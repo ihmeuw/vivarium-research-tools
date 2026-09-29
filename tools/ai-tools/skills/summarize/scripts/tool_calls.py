@@ -2,56 +2,72 @@
 
 Usage: python3 tool_calls.py <subagents-dir> [<cutoff-timestamp>]
 
-Reads every ``agent-<id>.jsonl`` (plus its ``.meta.json``) in the directory,
-skipping any whose first record is at or after the optional ISO cutoff, and
-prints, per sub-agent: its type and description, model, brief, every tool call
-with its target, errored calls, and its final report. No model is involved, so
-this is the cheap evidence for "what did this sub-agent actually check".
+Reads every ``agent-<id>.jsonl`` (plus its ``.meta.json``) in the directory and
+prints, per sub-agent in start order: its type and description, model, brief,
+every tool call with its target, errored calls, and its full final report. No
+model is involved, so this is the cheap evidence for "what did this sub-agent
+actually check".
+
+The optional cutoff is an ISO-8601 timestamp with a timezone. Sub-agents whose
+first record is at or after it are skipped, so that ``summarize`` can pass the
+time it was invoked and leave out the sub-agents it spawns itself.
 """
 
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 BRIEF_CHARS = 400
-REPORT_CHARS = 800
 TARGET_CHARS = 160
+MAX_CALLS = 40
 
-# The input field that names what a tool call touched, per tool.
+# The input fields that name what a tool call touched. Tools not listed here,
+# including Grep, Glob, and MCP tools, show every argument, because their
+# optional flags change what the call did.
 TARGET_KEYS = {
     "Read": ("file_path",),
     "Write": ("file_path",),
     "Edit": ("file_path",),
     "NotebookEdit": ("notebook_path",),
-    "Grep": ("pattern", "path"),
-    "Glob": ("pattern", "path"),
     "Bash": ("command",),
     "WebFetch": ("url",),
     "WebSearch": ("query",),
     "Agent": ("subagent_type", "description"),
+    # Older transcripts name the sub-agent dispatch tool Task.
+    "Task": ("subagent_type", "description"),
     "Skill": ("skill",),
 }
 
 
+def _normalize(text: str) -> str:
+    return " ".join(text.split())
+
+
 def _clip(text: str, limit: int) -> str:
-    text = " ".join(text.split())
+    text = _normalize(text)
     return text if len(text) <= limit else text[:limit] + "..."
 
 
 def _clip_middle(text: str, limit: int) -> str:
     # Paths and commands carry the useful part at both ends.
-    text = " ".join(text.split())
+    text = _normalize(text)
     if len(text) <= limit:
         return text
     half = (limit - 3) // 2
     return text[:half] + "..." + text[-half:]
 
 
+def _argument(key: str, value: object) -> str:
+    if isinstance(value, (str, int, float, bool)):
+        return f"{key}={value}"
+    return f"{key}=<{type(value).__name__}>"
+
+
 def _target(name: str, tool_input: dict) -> str:
     keys = TARGET_KEYS.get(name)
     if keys is None:
-        # MCP and other tools: show every scalar argument.
-        parts = [f"{k}={v}" for k, v in tool_input.items() if isinstance(v, (str, int, float))]
+        parts = [_argument(k, v) for k, v in tool_input.items()]
     else:
         parts = [str(tool_input[k]) for k in keys if tool_input.get(k)]
     return _clip_middle(" | ".join(parts), TARGET_CHARS)
@@ -65,13 +81,30 @@ def _text(content: object) -> str:
     return ""
 
 
-def _started_at(transcript: Path) -> str:
+def _parse_timestamp(value: str) -> datetime:
+    """Parse an ISO-8601 timestamp that carries a timezone."""
+    # fromisoformat only accepts a trailing Z from Python 3.11.
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError(f"timestamp has no timezone: {value}")
+    return parsed
+
+
+def _started_at(transcript: Path) -> datetime | None:
+    """Return when a transcript's first record was written, or None if unrecorded."""
     with transcript.open() as lines:
-        return json.loads(next(lines, "{}")).get("timestamp", "")
+        timestamp = json.loads(next(lines, "{}")).get("timestamp")
+    return _parse_timestamp(timestamp) if timestamp else None
 
 
 def summarize_agent(transcript: Path) -> str:
-    """Return the tool-call digest for one sub-agent transcript."""
+    """Return the tool-call digest for one sub-agent transcript.
+
+    Raises
+    ------
+    ValueError
+        If a line of the transcript is not valid JSON.
+    """
     meta_path = transcript.with_suffix(".meta.json")
     meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
     models: set[str] = set()
@@ -81,59 +114,91 @@ def summarize_agent(transcript: Path) -> str:
     handback = ""
     last_text = ""
 
-    for line_number, line in enumerate(transcript.open(), 1):
-        record = json.loads(line)
-        message = record.get("message")
-        if not isinstance(message, dict):
-            continue
-        content = message.get("content")
-        if record.get("type") == "user":
-            if not brief and isinstance(content, str):
-                brief = content
-            if isinstance(content, list):
-                for block in content:
-                    if block.get("type") == "tool_result" and block.get("is_error"):
-                        errors.add(block.get("tool_use_id", ""))
-        elif record.get("type") == "assistant":
-            if message.get("model"):
-                models.add(message["model"])
-            for block in content if isinstance(content, list) else []:
-                if block.get("type") == "text" and block.get("text", "").strip():
-                    last_text = block["text"]
-                elif block.get("type") == "tool_use":
-                    name, tool_input = block.get("name", ""), block.get("input") or {}
-                    if name == "SubagentHandback":
-                        handback = _text(tool_input.get("message", ""))
-                    else:
-                        calls.append((line_number, block.get("id", ""), name, _target(name, tool_input)))
+    # Collect the brief, models, tool calls, failed call ids, and final report in one pass.
+    with transcript.open() as lines:
+        for line_number, line in enumerate(lines, 1):
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise ValueError(f"line {line_number} is not valid JSON: {error}") from error
+            message = record.get("message")
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content")
+            if record.get("type") == "user":
+                if not brief and isinstance(content, str):
+                    brief = content
+                if isinstance(content, list):
+                    for block in content:
+                        if block.get("type") == "tool_result" and block.get("is_error"):
+                            errors.add(block.get("tool_use_id", ""))
+            elif record.get("type") == "assistant":
+                if message.get("model"):
+                    models.add(message["model"])
+                for block in content if isinstance(content, list) else []:
+                    if block.get("type") == "text" and block.get("text", "").strip():
+                        last_text = block["text"]
+                    elif block.get("type") == "tool_use":
+                        name, tool_input = block.get("name", ""), block.get("input") or {}
+                        if name == "SubagentHandback":
+                            handback = _text(tool_input.get("message", ""))
+                        else:
+                            calls.append(
+                                (line_number, block.get("id", ""), name, _target(name, tool_input))
+                            )
 
-    lines = [
+    # Render the header, the capped call list with error flags, and the full report.
+    lines_out = [
         f"## {transcript.name}",
         f"type: {meta.get('agentType', '?')} | description: {meta.get('description', '?')}",
         f"model: {', '.join(sorted(models)) or '?'}",
         f"brief: {_clip(brief, BRIEF_CHARS)}",
         f"tool calls ({len(calls)}):",
     ]
-    for line_number, call_id, name, target in calls:
+    for line_number, call_id, name, target in calls[:MAX_CALLS]:
         flag = " [ERROR]" if call_id in errors else ""
-        lines.append(f"  L{line_number} {name}: {target}{flag}")
+        lines_out.append(f"  L{line_number} {name}: {target}{flag}")
+    if len(calls) > MAX_CALLS:
+        lines_out.append(f"  ... {len(calls) - MAX_CALLS} more calls not shown")
     report_source = "handback" if handback else "last text (no handback)"
-    lines.append(f"report ({report_source}): {_clip(handback or last_text, REPORT_CHARS)}")
-    return "\n".join(lines)
+    lines_out.append(f"report ({report_source}): {_normalize(handback or last_text)}")
+    return "\n".join(lines_out)
+
+
+def _digest(transcript: Path, start: datetime | None) -> str:
+    # One unreadable transcript must not cost the listing for every other agent.
+    try:
+        digest = summarize_agent(transcript)
+    except (ValueError, OSError) as error:
+        return f"## {transcript.name}\nparse error: {error}"
+    if start is None:
+        digest += "\nstart time unknown: included regardless of the cutoff"
+    return digest
 
 
 def main() -> None:
     if len(sys.argv) not in (2, 3):
         sys.exit("usage: tool_calls.py <subagents-dir> [<cutoff-timestamp>]")
-    cutoff = sys.argv[2] if len(sys.argv) == 3 else None
-    transcripts = sorted(Path(sys.argv[1]).glob("agent-*.jsonl"))
-    if cutoff:
-        # ISO-8601 UTC timestamps compare correctly as strings.
-        transcripts = [t for t in transcripts if _started_at(t) < cutoff]
-    if not transcripts:
+    try:
+        cutoff = _parse_timestamp(sys.argv[2]) if len(sys.argv) == 3 else None
+    except ValueError as error:
+        sys.exit(f"invalid cutoff: {error}")
+
+    agents = []
+    for transcript in Path(sys.argv[1]).glob("agent-*.jsonl"):
+        try:
+            start = _started_at(transcript)
+        except (ValueError, OSError):
+            start = None
+        if cutoff and start and start >= cutoff:
+            continue
+        agents.append((start, transcript))
+    if not agents:
         print("no sub-agent transcripts found")
         return
-    print("\n\n".join(summarize_agent(t) for t in transcripts))
+    # Unknown start times sort last.
+    agents.sort(key=lambda agent: (agent[0] is None, agent[0] or datetime.min, agent[1].name))
+    print("\n\n".join(_digest(transcript, start) for start, transcript in agents))
 
 
 if __name__ == "__main__":

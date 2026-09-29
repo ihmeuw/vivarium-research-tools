@@ -2,7 +2,7 @@
 name: summarize
 description: "Summarize the current Claude Code session: which prompts the human gave, how much the human directed, challenged, and checked, and above all what has NOT been verified. Reads the session transcript rather than relying on memory, and compresses the result to a short, reviewer-first summary. Use when the user asks to \"summarize this session\", \"summarize my AI use\", \"write the AI summary\", or \"how much of this did I review\"."
 argument-hint: "Optional: a word limit (default 250)."
-allowed-tools: Read, Grep, Glob, Bash(wc -w:*), Bash(find:*), Bash(grep:*), Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/tool_calls.py *), Agent(simsci:_trace_extractor)
+allowed-tools: Read, Grep, Glob, Bash(wc -w:*), Bash(grep:*), Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/tool_calls.py *), Agent(simsci:_trace_extractor)
 ---
 
 # Summarize
@@ -73,25 +73,39 @@ sub-agent's tool calls without a model:
 python3 ${CLAUDE_SKILL_DIR}/scripts/tool_calls.py <subagents-dir> <cutoff>
 ```
 
-`<cutoff>` is the `timestamp` of the record that invoked `summarize`, so
-sub-agents started by this skill are excluded. For each sub-agent the script
-prints its type and description, model, the start of its brief, every tool call
-with its target (file, pattern, command, URL) and whether it errored, and its
-final report. "No sub-agent transcripts found" means none ran.
+`<cutoff>` is the `timestamp` field of the record in the main transcript that
+invoked `summarize` (step 1), copied exactly, so sub-agents started by this
+skill are excluded. The script rejects a cutoff it cannot parse. For each
+sub-agent, in the order they started, it prints:
 
-Compare each report against its tool calls. A claim the calls back up (it read
-the file it quotes, ran the command it cites) or contradict (it says
-"verified" but opened nothing that could verify it) is settled from the listing
-alone; record the contradiction as not verified. Only where you cannot tell,
-for example a claim about a file's contents that the listing does not show it
-opened, dispatch `simsci:_trace_extractor` on that sub-agent's transcript, with
-its role hint (`agentType` and description) and the focus: what it was asked to
-check, what it actually opened or recomputed, and what it reported finding.
+- its type and description, model, and the start of its brief;
+- every tool call with its target (the file, command, URL, search query, or
+  dispatched agent, and every argument of Grep, Glob, and MCP calls) and
+  whether it errored, up to 40 calls with a count of the rest;
+- its full final report.
+
+"no sub-agent transcripts found" means none ran. An agent marked "parse error"
+could not be read, and one marked "start time unknown" was included without
+checking the cutoff.
+
+Compare each report against its tool calls. The listing shows which tools and
+targets a sub-agent used, never what those calls returned. So it settles one
+kind of claim on its own: a claim that the sub-agent looked at something, which
+the listing either shows (it read the file, ran the command) or contradicts (it
+says "verified" but opened nothing that could verify it; record that as not
+verified). A claim that rests on what a call returned, such as a
+value, a count, or a quoted passage, is not settled even when the right file was
+opened. For those, and for agents with calls not shown or a parse error,
+dispatch `simsci:_trace_extractor` on that sub-agent's transcript, with its role
+hint (`agentType` and description) and the focus: what it was asked to check,
+what it actually opened or recomputed, and what it reported finding.
 Dispatch these in one message, at most 20 at a time (Claude Code's default
-limit on concurrent sub-agents).
+limit on concurrent sub-agents). If a dispatch is refused for the concurrency
+limit, wait for earlier extractors to finish and dispatch the rest then; do not
+retry refused calls immediately.
 
-If `python3` is unavailable or the script fails, say so and fall back to one
-extractor per sub-agent, batched the same way.
+If `python3` is unavailable or the script fails outright, say so and fall back to
+one extractor per sub-agent, batched the same way.
 
 ## 3. Draft the full account (pass 1)
 

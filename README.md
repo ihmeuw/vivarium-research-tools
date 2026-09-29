@@ -5,7 +5,7 @@ Tooling for the IHME Simulation Science research team.
 ## Tools
 
 Tooling that is not a Python package and is not published to PyPI lives under `tools/`.
-CI does not build or test these.
+CI builds none of these; `.github/workflows/test-ai-tools.yml` runs the plugin's script tests.
 
 | Directory | Purpose |
 |---|---|

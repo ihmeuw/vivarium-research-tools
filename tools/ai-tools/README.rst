@@ -34,6 +34,9 @@ Layout
 
 - ``tools/ai-tools/.claude-plugin/plugin.json``: plugin manifest
 - ``tools/ai-tools/skills/``: Claude Code skills
+- ``tools/ai-tools/tests/``: pytest tests for scripts bundled with the skills
+  (run ``python3 -m pytest tools/ai-tools/tests``; CI runs them on every PR that
+  touches ``tools/ai-tools/``)
 - ``tools/ai-tools/CHANGELOG.rst``: history of plugin changes
 
 Installing in Claude Code
