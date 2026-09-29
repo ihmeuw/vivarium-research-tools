@@ -1,0 +1,12 @@
+{
+    "name": "simsci-research",
+    "displayName": "Simulation Science Research AI Tools",
+    "description": "Agent workflows for the IHME Simulation Science research team; depends on the simsci plugin for shared tooling.",
+    "author": { "name": "IHME Simulation Science" },
+    "homepage": "https://github.com/ihmeuw/vivarium-research-tools/blob/main/tools/ai-tools/README.rst",
+    "repository": "https://github.com/ihmeuw/vivarium-research-tools",
+    "license": "BSD-3-Clause",
+    "dependencies": [
+        "simsci"
+    ]
+}
