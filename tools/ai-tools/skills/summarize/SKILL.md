@@ -97,6 +97,10 @@ Then compare with what the transcript shows Claude doing:
   was made outside Claude. One made after the `summarize` invocation is out of
   scope. Git prints local time with an offset (`14:28:39-06:00`) while the
   transcript uses UTC (`20:28:49.036Z`); convert before comparing.
+- Only commits inside that window count. A commit from before the session that
+  a push in the session dropped or overwrote (a force-push, a rebase) is not
+  work found in the repository; report it as part of that push, for example
+  "the force-push dropped `6d37e707c`".
 
 This shows the repository as it is now, which may include work unrelated to the
 session, so report these as "found in the repository, not made by Claude"
@@ -167,6 +171,10 @@ one extractor per sub-agent, batched the same way.
 From the digests, build the full account for yourself - not for output:
 
 - **Setup:** model(s) as recorded, number of human prompts, sub-agents used.
+- **What Claude changed outside its working copy:** every commit, push, and
+  other write to shared state (a PR, an issue, a message) that Claude made, with
+  its hash or link. Name force-pushes and history rewrites as such, with what
+  they dropped.
 - **What the human directed:** the arc of the work in a few steps, including
   the files edited and the commits made outside Claude (from the transcript and
   the repository check).
@@ -201,15 +209,19 @@ Evidence rules - the account is only useful if it does not flatter the work:
 ## 4. Compress (pass 2)
 
 Rewrite pass 1 under the word limit given above, or **250 words** if none was
-given. Keep the not-verified items first and complete - cut everything
-else before cutting one of them. Count the words with `wc -w` (pass the draft on
+given. Keep the not-verified items first and complete, and keep what Claude
+changed outside its working copy - cut everything else before cutting one of
+them. Count the words with `wc -w` (pass the draft on
 a quoted heredoc, `wc -w <<'EOF'`) rather than estimating. The limit is hard:
 while the count is over, cut and count again, and print only a draft whose last
 count is at or under the limit. If the word limit is too small to hold even the
-not-verified items, ask permission to exceed it.
+not-verified items and Claude's changes, ask permission to exceed it.
 
 ```
 **AI use:** <one sentence: tool, model(s), roughly N prompts, sub-agents if any>
+
+**Claude changed:** <each commit, push, or other shared write, with hash or
+link; force-pushes named as such with what they dropped; omit if none>
 
 **Not verified**
 - <most consequential first>
