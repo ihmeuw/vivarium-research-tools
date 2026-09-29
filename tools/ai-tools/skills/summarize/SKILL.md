@@ -2,7 +2,7 @@
 name: summarize
 description: "Summarize the current Claude Code session: which prompts the human gave, how much the human directed, challenged, and checked, and above all what has NOT been verified. Reads the session transcript rather than relying on memory, and compresses the result to a short, reviewer-first summary. Use when the user asks to \"summarize this session\", \"summarize my AI use\", \"write the AI summary\", or \"how much of this did I review\"."
 argument-hint: "Optional: a word limit (default 250)."
-allowed-tools: Read, Grep, Glob, Bash(wc -w:*), Agent(simsci:_trace_extractor)
+allowed-tools: Read, Grep, Glob, Bash(wc -w:*), Bash(find:*), Bash(grep:*), Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/tool_calls.py *), Agent(simsci:_trace_extractor)
 ---
 
 # Summarize
@@ -17,7 +17,9 @@ Word limit: $ARGUMENTS
 
 Claude Code does not document where it stores transcripts; expect the session's
 transcript at `<config-dir>/projects/*/${CLAUDE_SESSION_ID}.jsonl`, where
-`<config-dir>` is `$CLAUDE_CONFIG_DIR` if set, else `~/.claude`, and glob for it.
+`<config-dir>` is `$CLAUDE_CONFIG_DIR` if set, else `~/.claude`, and search for
+it. Use the Glob and Grep tools where they exist; some sessions lack them, so
+fall back to `find` and `grep` in Bash.
 Sub-agent transcripts, if any sub-agents ran, are expected in the sibling
 `${CLAUDE_SESSION_ID}/subagents/` directory, one `agent-<id>.jsonl` plus
 `agent-<id>.meta.json` each.
@@ -47,23 +49,49 @@ full text of each match rather than a truncated line:
   working is an `attachment` record with `attachment.type` `queued_command` and
   `commandMode` `prompt`, text in `attachment.prompt` (grep `"queued_command"`;
   skip those whose text is a `<task-notification>`).
+- **Answers to Claude's questions** arrive as `tool_result` blocks, not typed
+  prompts, so the skip rule above would drop them. Keep the result of each
+  `AskUserQuestion` call (text starting `Your questions have been answered`)
+  and each rejected tool call where the user said how to proceed (text starting
+  `The user doesn't want to proceed`); both are decisions the author made.
 
 Keep each prompt, in order, as a one-line paraphrase with its line ref, plus a
 short verbatim quote where the wording matters (a challenge, a correction, a
 stated check).
 
-**Agent activity: delegate it.** Enumerate the sub-agent transcripts yourself
-(Glob `subagents/*.meta.json`; none means no sub-agents ran). Then dispatch
-`simsci:_trace_extractor` **in a single message**, one per transcript (the main transcript plus each sub-agent).
-Each brief carries the absolute path; a role hint (the sub-agent's `meta.json`
-`agentType` and description, or "the main session" for the main transcript);
-for the main transcript only, the `subagents/` directory; and this focus:
+**Main-session activity: delegate it.** Dispatch one `simsci:_trace_extractor`
+on the main transcript. Its brief carries the absolute path, the role hint "the
+main session", the `subagents/` directory, and this focus: the distinct
+`message.model` values; web fetches and searches (URL or query); files read that
+are sources or data rather than code; and each sub-agent dispatch's description
+and one-line result.
 
-- **Main transcript:** the distinct `message.model` values; web fetches and
-  searches (URL or query); files read that are sources or data rather than code;
-  and each sub-agent dispatch's description and one-line result.
-- **Each sub-agent:** what it was asked to check, what it actually opened or
-  recomputed, and what it reported finding.
+**Sub-agent activity: script it.** While the extractor runs, list every
+sub-agent's tool calls without a model:
+
+```
+python3 ${CLAUDE_SKILL_DIR}/scripts/tool_calls.py <subagents-dir> <cutoff>
+```
+
+`<cutoff>` is the `timestamp` of the record that invoked `summarize`, so
+sub-agents started by this skill are excluded. For each sub-agent the script
+prints its type and description, model, the start of its brief, every tool call
+with its target (file, pattern, command, URL) and whether it errored, and its
+final report. "No sub-agent transcripts found" means none ran.
+
+Compare each report against its tool calls. A claim the calls back up (it read
+the file it quotes, ran the command it cites) or contradict (it says
+"verified" but opened nothing that could verify it) is settled from the listing
+alone; record the contradiction as not verified. Only where you cannot tell,
+for example a claim about a file's contents that the listing does not show it
+opened, dispatch `simsci:_trace_extractor` on that sub-agent's transcript, with
+its role hint (`agentType` and description) and the focus: what it was asked to
+check, what it actually opened or recomputed, and what it reported finding.
+Dispatch these in one message, at most 20 at a time (Claude Code's default
+limit on concurrent sub-agents).
+
+If `python3` is unavailable or the script fails, say so and fall back to one
+extractor per sub-agent, batched the same way.
 
 ## 3. Draft the full account (pass 1)
 
