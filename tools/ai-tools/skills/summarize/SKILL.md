@@ -2,7 +2,7 @@
 name: summarize
 description: "Summarize the current Claude Code session: which prompts the human gave, how much the human directed, challenged, and checked, and above all what has NOT been verified. Reads the session transcript rather than relying on memory, and compresses the result to a short, reviewer-first summary. Use when the user asks to \"summarize this session\", \"summarize my AI use\", \"write the AI summary\", or \"how much of this did I review\"."
 argument-hint: "Optional: a word limit (default 250)."
-allowed-tools: Read, Grep, Glob, Bash(wc -w:*), Bash(grep:*), Bash(git -C * status:*), Bash(git -C * log:*), Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/tool_calls.py *), Agent(simsci:_trace_extractor)
+allowed-tools: Read, Grep, Glob, Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/tool_calls.py *), Agent(simsci:_trace_extractor)
 ---
 
 # Summarize
@@ -81,15 +81,17 @@ stated check).
 edit to a file Claude never opened with Read, or a commit and push from the
 author's own terminal, leaves no trace in any transcript. The repository is the
 only place it shows. For each distinct `cwd` recorded in the main transcript
-that is inside a git repository, run:
+that is inside a git repository, run these exactly as written. Use `-C` rather
+than `cd`, since the session's `cwd` may not be the directory you are in now:
 
 ```
 git -C <cwd> status --short
 git -C <cwd> log --since=<session start> --format='%h %an %aI %s'
 ```
 
-where `<session start>` is the `timestamp` of the transcript's first record.
-Then compare with what the transcript shows Claude doing:
+where `<session start>` is the `timestamp` of the first transcript record that
+has one, copied exactly. Do not round it or widen the window: an earlier start
+pulls in commits from before the session. Then compare with what the transcript shows Claude doing:
 
 - An uncommitted change to a file Claude never changed with Edit or Write was
   made outside Claude.
@@ -106,6 +108,11 @@ This shows the repository as it is now, which may include work unrelated to the
 session, so report these as "found in the repository, not made by Claude"
 rather than attributing them to the author, unless a prompt says the author did
 it.
+
+**Short sessions: read directly.** If the main transcript is under 300 lines up
+to the `summarize` invocation and no sub-agents ran, skip the extractor and the
+script below: read the transcript yourself, covering the same focus the
+extractor would. The repository check above still applies.
 
 **Main-session activity: delegate it.** Dispatch one `simsci:_trace_extractor`
 on the main transcript. Its brief carries the absolute path, the role hint "the
