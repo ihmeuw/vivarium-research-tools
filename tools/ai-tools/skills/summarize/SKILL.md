@@ -2,7 +2,7 @@
 name: summarize
 description: "Summarize the current Claude Code session: which prompts the human gave, how much the human directed, challenged, and checked, and above all what has NOT been verified. Reads the session transcript rather than relying on memory, and compresses the result to a short, reviewer-first summary. Use when the user asks to \"summarize this session\", \"summarize my AI use\", \"write the AI summary\", or \"how much of this did I review\"."
 argument-hint: "Optional: a word limit (default 250)."
-allowed-tools: Read, Grep, Glob, Bash(wc -w:*), Bash(grep:*), Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/tool_calls.py *), Agent(simsci:_trace_extractor)
+allowed-tools: Read, Grep, Glob, Bash(wc -w:*), Bash(grep:*), Bash(git -C * status:*), Bash(git -C * log:*), Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/tool_calls.py *), Agent(simsci:_trace_extractor)
 ---
 
 # Summarize
@@ -77,6 +77,32 @@ Keep each prompt, in order, as a one-line paraphrase with its line ref, plus a
 short verbatim quote where the wording matters (a challenge, a correction, a
 stated check).
 
+**Repository state: check it yourself.** Work done outside Claude, such as an
+edit to a file Claude never opened with Read, or a commit and push from the
+author's own terminal, leaves no trace in any transcript. The repository is the
+only place it shows. For each distinct `cwd` recorded in the main transcript
+that is inside a git repository, run:
+
+```
+git -C <cwd> status --short
+git -C <cwd> log --since=<session start> --format='%h %an %aI %s'
+```
+
+where `<session start>` is the `timestamp` of the transcript's first record.
+Then compare with what the transcript shows Claude doing:
+
+- An uncommitted change to a file Claude never changed with Edit or Write was
+  made outside Claude.
+- A commit in the log with no matching `git commit` by Claude in the transcript
+  was made outside Claude. One made after the `summarize` invocation is out of
+  scope. Git prints local time with an offset (`14:28:39-06:00`) while the
+  transcript uses UTC (`20:28:49.036Z`); convert before comparing.
+
+This shows the repository as it is now, which may include work unrelated to the
+session, so report these as "found in the repository, not made by Claude"
+rather than attributing them to the author, unless a prompt says the author did
+it.
+
 **Main-session activity: delegate it.** Dispatch one `simsci:_trace_extractor`
 on the main transcript. Its brief carries the absolute path, the role hint "the
 main session", the `subagents/` directory, and this focus: the distinct
@@ -142,7 +168,8 @@ From the digests, build the full account for yourself - not for output:
 
 - **Setup:** model(s) as recorded, number of human prompts, sub-agents used.
 - **What the human directed:** the arc of the work in a few steps, including
-  the files the author edited directly.
+  the files edited and the commits made outside Claude (from the transcript and
+  the repository check).
 - **What the human caught:** each challenge or correction that changed a number
   or a conclusion, with its severity.
 - **What automated checks caught:** sub-agent findings that changed the work.
