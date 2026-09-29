@@ -55,64 +55,69 @@ through them is not visible; if the author mentions one, say it was not included
 
 ## 2. Extract
 
-**Human prompts: extract these yourself.** Grep the main transcript, with line
-numbers, for every human prompt up to the `summarize` invocation, and read the
-full text of each match rather than a truncated line:
+`<cutoff>` below is always the `timestamp` field of the record in the main
+transcript that invoked `summarize`, copied exactly. The script rejects a
+cutoff it cannot parse. Run every script command exactly as shown, without
+piping its output through `head`, `grep`, or another filter: the script already
+caps what it prints and says what it cut, and a filter would drop lines
+silently.
 
-- **Harness messages look like prompts.** The harness also delivers messages as
-  `user` records and as the `queued_command` attachments below: task
-  notifications, and sub-agent reports (`<agent-message`, often after "Another
-  Claude session sent a message:"). Skip any text that contains
-  `<task-notification>` or `<agent-message` wherever it appears; the person did
-  not type it.
-- **Typed prompts** are `user` records whose content is the person's own text
-  (for example, `"role":"user","content":"`). Skip `tool_result` blocks,
-  `isCompactSummary` records, and text that is only `<system-reminder>`
-  content.
-- **Mid-turn prompts** are never `user` records. A prompt typed while Claude was
-  working is an `attachment` record with `attachment.type` `queued_command` and
-  `commandMode` `prompt`, text in `attachment.prompt` (grep `"queued_command"`).
-- **Answers to Claude's questions** arrive as `tool_result` blocks, not typed
-  prompts, so the skip rule above would drop them. Find each `tool_use` block
-  named `AskUserQuestion` and keep the `tool_result` whose `tool_use_id` matches
-  its `id`; match by id, not by the result's wording, which Claude Code changes
-  between releases. Also keep each rejected tool call where the user said how
-  to proceed (a `tool_result` with `is_error` set whose text quotes what the
-  user said). Both are decisions the author made.
-- **Direct edits** by the author, outside Claude, are not prompts. Claude Code
-  records a file that changed on disk after Claude read it as an `attachment`
-  record with `attachment.type` `edited_text_file`, the path in `attachment.filename`,
-  and the new content in `attachment.snippet` (grep `"edited_text_file"`). Keep
-  each as a one-line note of the file and what changed. A formatter or another
-  tool can also trigger one, so call them "edited outside Claude" unless a prompt
-  says the author made the change. Claude Code only tracks files Claude opened
-  with the Read tool, so a file Claude only saw through Bash (`cat`, `sed`) leaves
-  no record when someone else edits it. If the main extractor shows Claude
-  committing or diffing changes it never made with Edit or Write, those changes
-  came from outside Claude too; note them the same way.
+**Human input: script it.** Run:
 
-Keep each prompt, in order, as a one-line paraphrase with its line ref, plus a
+```
+python3 ${CLAUDE_SKILL_DIR}/scripts/tool_calls.py prompts <main-transcript> <cutoff>
+```
+
+It prints the session start and the working directories, then one line per
+human input up to the invocation, with its transcript line:
+
+- `TYPED` and `MIDTURN`: prompts, including ones typed while Claude was working.
+- `COMMAND`: slash commands. `SHELL`: commands the author ran with `!`.
+  `INTERRUPTED`: the author stopped Claude mid-action.
+- `ANSWER`: the author's answer to a question Claude asked, matched to the
+  question by id rather than wording.
+- `REJECTED TOOL CALL`: a tool call the author refused, with the reason they
+  gave.
+- `EDITED OUTSIDE CLAUDE`: a file that changed on disk after Claude read it.
+
+It already leaves out what the harness delivers in the same records (sub-agent
+reports, task notifications), system reminders, and compaction summaries. Long
+inputs are clipped; where the wording matters, read the full text at that line
+of the transcript. If the script fails, say so, and extract the same kinds of
+input with Read and Grep.
+
+Keep each input, in order, as a one-line paraphrase with its line ref, plus a
 short verbatim quote where the wording matters (a challenge, a correction, a
 stated check).
 
-**Repository state: check it yourself.** Work done outside Claude, such as an
-edit to a file Claude never opened with Read, or a commit and push from the
-author's own terminal, leaves no trace in any transcript. The repository is the
-only place it shows. For each distinct `cwd` recorded in the main transcript
-that is inside a git repository, run these exactly as written. Use `-C` rather
-than `cd`, since the session's `cwd` may not be the directory you are in now:
+Two cautions about `EDITED OUTSIDE CLAUDE`. First, it is not always the author:
+a formatter, or Claude itself writing the file through Bash (`sed -i`,
+`echo >>`) rather than Edit or Write, triggers it too. Check the transcript for
+a Bash command by Claude that wrote that file before counting it as the
+author's. Second, Claude Code only tracks files Claude opened with the Read
+tool, so an edit to a file Claude only saw through Bash (`cat`, `sed`) leaves no
+record. The repository check below catches those.
+
+**Repository state: check it on every run, short sessions included.** Work done
+outside Claude, such as an edit to a file Claude never opened with Read, or a
+commit and push from the author's own terminal, leaves no trace in any
+transcript. The repository is the only place it shows. For each working
+directory in the script's header that is inside a git repository, run these
+exactly as written. Use `-C` rather than `cd`, since the session's directory may
+not be the one you are in now:
 
 ```
 git -C <cwd> status --short
 git -C <cwd> log --since=<session start> --format='%h %an %aI %s'
 ```
 
-where `<session start>` is the `timestamp` of the first transcript record that
-has one, copied exactly. Do not round it or widen the window: an earlier start
-pulls in commits from before the session. Then compare with what the transcript shows Claude doing:
+where `<session start>` is the session start from the script's header, copied
+exactly. Do not round it or widen the window: an earlier start pulls in commits
+from before the session. Then compare with what the transcript shows Claude
+doing:
 
-- An uncommitted change to a file Claude never changed with Edit or Write was
-  made outside Claude.
+- An uncommitted change to a file Claude never changed with Edit or Write, or
+  wrote through Bash, was made outside Claude.
 - A commit in the log with no matching `git commit` by Claude in the transcript
   was made outside Claude. One made after the `summarize` invocation is out of
   scope. Git prints local time with an offset (`14:28:39-06:00`) while the
@@ -129,8 +134,8 @@ it.
 
 **Short sessions: read directly.** If the main transcript is under 300 lines up
 to the `summarize` invocation and no sub-agents ran, skip the extractor and the
-script below: read the transcript yourself, covering the same focus the
-extractor would. The repository check above still applies.
+sub-agent listing below: read the transcript yourself, covering the same focus
+the extractor would. The two steps above still apply.
 
 **Main-session activity: delegate it.** Dispatch one `simsci:_trace_extractor`
 on the main transcript. Its brief carries the absolute path, the role hint "the
@@ -144,17 +149,11 @@ the program itself) with what it reported.
 sub-agent's tool calls without a model:
 
 ```
-python3 ${CLAUDE_SKILL_DIR}/scripts/tool_calls.py <subagents-dir> <cutoff>
+python3 ${CLAUDE_SKILL_DIR}/scripts/tool_calls.py agents <subagents-dir> <cutoff>
 ```
 
-Run it exactly as shown, without piping the output through `head`, `grep`, or
-another filter: the script already caps what it prints and says what it cut, and
-a filter would drop agents or reports silently.
-
-`<cutoff>` is the `timestamp` field of the record in the main transcript that
-invoked `summarize` (step 1), copied exactly, so sub-agents started by this
-skill are excluded. The script rejects a cutoff it cannot parse. For each
-sub-agent, in the order they started, it prints:
+The cutoff excludes the sub-agents this skill starts. For each sub-agent, in the
+order they started, it prints:
 
 - its type and description, model, and the start of its brief;
 - every tool call with its target (the file, command, URL, search query, or
@@ -228,6 +227,10 @@ Evidence rules - the account is only useful if it does not flatter the work:
   transcript for Claude doing it (for example, the `git commit` inside a longer
   Bash command). If Claude did it, say so, and keep separate what the author
   changed from what Claude then committed or pushed.
+- Work from before the session start, such as an earlier commit Claude only
+  looked at, is out of scope: do not list it as not verified. Mention it only
+  where something in the session acted on it, such as a push that dropped it or
+  a rebase onto it.
 - Report the model from the transcript, never from memory.
 - Refer to the human as "the author". Do not guess pronouns.
 

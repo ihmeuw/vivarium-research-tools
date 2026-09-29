@@ -17,6 +17,7 @@ It includes:
 
 - ``/simsci-research:summarize [word limit]`` - summarize the current session for
   reviewers. Reads the session and sub-agent transcripts rather than relying on memory,
+  checks the repository for work done outside Claude,
   drafts a full account of the human prompts, what the human directed and checked,
   and what remains unverified, then compresses it to a short summary (250 words
   by default) that leads with the unverified items.
