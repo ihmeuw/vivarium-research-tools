@@ -55,10 +55,12 @@ full text of each match rather than a truncated line:
   working is an `attachment` record with `attachment.type` `queued_command` and
   `commandMode` `prompt`, text in `attachment.prompt` (grep `"queued_command"`).
 - **Answers to Claude's questions** arrive as `tool_result` blocks, not typed
-  prompts, so the skip rule above would drop them. Keep the result of each
-  `AskUserQuestion` call (text starting `Your questions have been answered`)
-  and each rejected tool call where the user said how to proceed (text starting
-  `The user doesn't want to proceed`); both are decisions the author made.
+  prompts, so the skip rule above would drop them. Find each `tool_use` block
+  named `AskUserQuestion` and keep the `tool_result` whose `tool_use_id` matches
+  its `id`; match by id, not by the result's wording, which Claude Code changes
+  between releases. Also keep each rejected tool call where the user said how
+  to proceed (a `tool_result` with `is_error` set whose text quotes what the
+  user said). Both are decisions the author made.
 - **Direct edits** by the author, outside Claude, are not prompts. Claude Code
   records a file that changed on disk after Claude read it as an `attachment`
   record with `attachment.type` `edited_text_file`, the path in `attachment.filename`,
