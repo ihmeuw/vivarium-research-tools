@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -43,8 +44,28 @@ def _attachment(attachment: dict, at: str = "2026-01-01T00:00:01.000Z") -> dict:
     return {"type": "attachment", "timestamp": at, "attachment": attachment}
 
 
-def _cli(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run([sys.executable, str(SCRIPT), *args], capture_output=True, text=True)
+SESSION_ID = "0000-session"
+INVOKE = "<command-name>/simsci-research:summarize</command-name>"
+
+
+def _cli(config: Path, *args: str) -> subprocess.CompletedProcess:
+    env = {**os.environ, "CLAUDE_CONFIG_DIR": str(config)}
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, env=env
+    )
+
+
+def _session(config: Path, records: list[dict], invoked_at: str = CUTOFF) -> Path:
+    """Write a main transcript ending in a summarize invocation; return its sub-agents dir."""
+    project = config / "projects" / "-repo"
+    project.mkdir(parents=True)
+    invocation = _user(INVOKE, at=invoked_at)
+    (project / f"{SESSION_ID}.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in [*records, invocation]) + "\n"
+    )
+    subagents = project / SESSION_ID / "subagents"
+    subagents.mkdir(parents=True)
+    return subagents
 
 
 def _write_agent(
@@ -197,50 +218,120 @@ class TestAgents:
         assert tool_calls.summarize_agent(transcript).endswith("report (handback): finding")
 
     def test_cutoff_excludes_later_agents_and_orders_by_start(self, tmp_path: Path) -> None:
-        """Agents started at or after the cutoff are left out; the rest print in start order."""
+        """Agents started at or after the invocation are left out; the rest print in start order."""
+        subagents = _session(tmp_path, [_user("go")], invoked_at="2026-01-01T00:00:02.000Z")
         # Neither creation order nor name order matches start order.
-        _write_agent(tmp_path, "late", [], timestamp="2026-01-01T00:00:02.000Z")
-        _write_agent(tmp_path, "a-middle", [], timestamp="2026-01-01T00:00:01.000Z")
-        _write_agent(tmp_path, "z-early", [], timestamp="2026-01-01T00:00:00.000Z")
-        result = _cli("agents", str(tmp_path), "2026-01-01T00:00:02.000Z")
+        _write_agent(subagents, "late", [], timestamp="2026-01-01T00:00:02.000Z")
+        _write_agent(subagents, "a-middle", [], timestamp="2026-01-01T00:00:01.000Z")
+        _write_agent(subagents, "z-early", [], timestamp="2026-01-01T00:00:00.000Z")
+        result = _cli(tmp_path, "agents", SESSION_ID)
         assert result.returncode == 0
         assert "agent-late.jsonl" not in result.stdout
         assert result.stdout.index("agent-z-early") < result.stdout.index("agent-a-middle")
 
-    def test_cutoff_accepts_an_equivalent_offset(self, tmp_path: Path) -> None:
-        """A cutoff written as +00:00 compares equal to the transcripts' Z timestamps."""
-        _write_agent(tmp_path, "late", [], timestamp="2026-01-01T00:00:02.000Z")
-        result = _cli("agents", str(tmp_path), "2026-01-01T00:00:02+00:00")
-        assert result.stdout.strip() == "no sub-agent transcripts found"
-
-    @pytest.mark.parametrize("cutoff", ["yesterday", "2026-01-01T00:00:00"])
-    def test_malformed_cutoff_fails_loudly(self, tmp_path: Path, cutoff: str) -> None:
-        """An unparseable or timezone-less cutoff exits with an error instead of filtering."""
-        _write_agent(tmp_path, "a", [])
-        result = _cli("agents", str(tmp_path), cutoff)
-        assert result.returncode != 0
-        assert "invalid cutoff" in result.stderr
-
     def test_missing_timestamp_is_included_and_flagged(self, tmp_path: Path) -> None:
         """An agent with no start time is kept and marked, since the cutoff cannot apply."""
-        _write_agent(tmp_path, "a", [], timestamp=None)
-        result = _cli("agents", str(tmp_path), "2026-01-01T00:00:00.000Z")
+        _write_agent(_session(tmp_path, [_user("go")]), "a", [], timestamp=None)
+        result = _cli(tmp_path, "agents", SESSION_ID)
         assert "agent-a.jsonl" in result.stdout
         assert "start time unknown" in result.stdout
 
     def test_one_malformed_transcript_does_not_hide_the_others(self, tmp_path: Path) -> None:
         """A transcript with a bad line gets a parse-error entry; other agents still print."""
-        _write_agent(tmp_path, "good", [_tool_use("t1", "Read", {"file_path": "/x"})])
-        broken = _write_agent(tmp_path, "broken", [])
+        subagents = _session(tmp_path, [_user("go")])
+        _write_agent(subagents, "good", [_tool_use("t1", "Read", {"file_path": "/x"})])
+        broken = _write_agent(subagents, "broken", [])
         broken.write_text(broken.read_text() + "{not json\n")
-        result = _cli("agents", str(tmp_path))
+        result = _cli(tmp_path, "agents", SESSION_ID)
         assert result.returncode == 0
         assert "Read: /x" in result.stdout
         assert "agent-broken.jsonl\nparse error: line 2 is not valid JSON" in result.stdout
 
-    def test_empty_directory(self, tmp_path: Path) -> None:
-        """A directory with no sub-agent transcripts says so."""
-        assert _cli("agents", str(tmp_path)).stdout.strip() == "no sub-agent transcripts found"
+    def test_no_subagents(self, tmp_path: Path) -> None:
+        """A session with no sub-agent transcripts says so."""
+        _session(tmp_path, [_user("go")])
+        assert _cli(tmp_path, "agents", SESSION_ID).stdout.strip() == "no sub-agent transcripts found"
+
+
+class TestSession:
+    """Finding a session's transcript, its cutoff, and whether it is whole."""
+
+    def test_transcript_is_found_under_the_config_dir(self, tmp_path: Path) -> None:
+        """The transcript is looked up in $CLAUDE_CONFIG_DIR/projects/*/<session-id>.jsonl."""
+        _session(tmp_path, [_user("go")])
+        result = _cli(tmp_path, "prompts", SESSION_ID)
+        assert result.returncode == 0
+        assert f"transcript: {tmp_path}/projects/-repo/{SESSION_ID}.jsonl" in result.stdout
+
+    def test_missing_transcript_fails_loudly(self, tmp_path: Path) -> None:
+        """An unknown session id exits with an error naming where it looked."""
+        (tmp_path / "projects").mkdir()
+        result = _cli(tmp_path, "prompts", "no-such-session")
+        assert result.returncode != 0
+        assert "no transcript for session no-such-session" in result.stderr
+
+    def test_cutoff_is_the_last_invocation(self, tmp_path: Path) -> None:
+        """An earlier summarize run is in scope; only the last invocation is the cutoff."""
+        transcript = tmp_path / "s.jsonl"
+        records = [
+            _user(INVOKE, at="2026-01-01T00:00:01.000Z"),
+            _user("more work", at="2026-01-01T00:00:02.000Z"),
+            _user(INVOKE, at="2026-01-01T00:00:03.000Z"),
+        ]
+        transcript.write_text("\n".join(json.dumps(r) for r in records) + "\n")
+        cutoff, line_number = tool_calls.find_cutoff(transcript)
+        assert (cutoff.isoformat(), line_number) == ("2026-01-01T00:00:03+00:00", 3)
+
+    @pytest.mark.parametrize("skill", ["summarize", "simsci-research:summarize"])
+    def test_skill_tool_call_counts_as_an_invocation(self, tmp_path: Path, skill: str) -> None:
+        """A natural-language request reaches the skill through the Skill tool, which is the cutoff."""
+        call = {**_tool_use("s1", "Skill", {"skill": skill}), "timestamp": "2026-01-01T00:00:05.000Z"}
+        transcript = tmp_path / "s.jsonl"
+        transcript.write_text(json.dumps(_user("summarize my AI use")) + "\n" + json.dumps(call) + "\n")
+        assert tool_calls.find_cutoff(transcript)[1] == 2
+
+    def test_other_skills_and_commands_are_not_invocations(self, tmp_path: Path) -> None:
+        """Only summarize counts; a transcript without it has no cutoff."""
+        records = [
+            _user("<command-name>/simsci:pr-prep</command-name>"),
+            {**_tool_use("s1", "Skill", {"skill": "summarize-channel"}), "timestamp": CUTOFF},
+        ]
+        transcript = tmp_path / "s.jsonl"
+        transcript.write_text("\n".join(json.dumps(r) for r in records) + "\n")
+        with pytest.raises(ValueError, match="no summarize invocation"):
+            tool_calls.find_cutoff(transcript)
+
+    def test_whole_transcript_has_no_partial_reasons(self, tmp_path: Path) -> None:
+        """Session files written in the transcript's first second do not count as older."""
+        _session(tmp_path, [_user("go", at="2026-01-01T00:00:00.900Z")])
+        transcript = tmp_path / "projects" / "-repo" / f"{SESSION_ID}.jsonl"
+        title = transcript.parent / SESSION_ID / "custom-title.json"
+        title.write_text("{}")
+        same_second = tool_calls._parse_timestamp("2026-01-01T00:00:00Z").timestamp()
+        os.utime(title, (same_second, same_second))
+        assert tool_calls.partial_reasons(transcript) == []
+
+    def test_leftover_copy_means_partial(self, tmp_path: Path) -> None:
+        """A renamed copy beside the transcript means earlier turns are in it."""
+        _session(tmp_path, [_user("go")])
+        transcript = tmp_path / "projects" / "-repo" / f"{SESSION_ID}.jsonl"
+        transcript.with_name(f"{SESSION_ID}.jsonl.bak").write_text("{}\n")
+        result = _cli(tmp_path, "prompts", SESSION_ID)
+        assert result.returncode == 3
+        assert "PARTIAL TRANSCRIPT" in result.stdout
+        assert f"{SESSION_ID}.jsonl.bak" in result.stdout
+
+    def test_older_session_files_mean_partial(self, tmp_path: Path) -> None:
+        """A session file last modified over a minute before the first record means partial."""
+        _session(tmp_path, [_user("go", at="2026-01-01T00:10:00.000Z")])
+        transcript = tmp_path / "projects" / "-repo" / f"{SESSION_ID}.jsonl"
+        title = transcript.parent / SESSION_ID / "custom-title.json"
+        title.write_text("{}")
+        earlier = tool_calls._parse_timestamp("2026-01-01T00:00:00Z").timestamp()
+        os.utime(title, (earlier, earlier))
+        reasons = tool_calls.partial_reasons(transcript)
+        assert len(reasons) == 1
+        assert "custom-title.json" in reasons[0]
 
 
 class TestPrompts:
@@ -371,10 +462,12 @@ class TestPrompts:
         )
         assert lines[3:] == ["L1 TYPED: before"]
 
-    def test_malformed_cutoff_fails_loudly(self, tmp_path: Path) -> None:
-        """A cutoff without a timezone exits with an error."""
-        transcript = tmp_path / "session.jsonl"
-        transcript.write_text(json.dumps(_user("hi")) + "\n")
-        result = _cli("prompts", str(transcript), "2026-01-01T00:00:00")
-        assert result.returncode != 0
-        assert "invalid cutoff" in result.stderr
+    def test_cli_header_gives_the_cutoff_and_sub_agents(self, tmp_path: Path) -> None:
+        """The command prints where things are and how big the session is before the inputs."""
+        subagents = _session(tmp_path, [_user("hi")])
+        _write_agent(subagents, "a", [])
+        lines = _cli(tmp_path, "prompts", SESSION_ID).stdout.splitlines()
+        assert lines[1] == f"sub-agents directory: {subagents} (1 before the cutoff)"
+        assert lines[2] == f"cutoff: {tool_calls._parse_timestamp(CUTOFF).isoformat()} (line 2)"
+        assert lines[3] == "lines before the cutoff: 1"
+        assert lines[-1] == "L1 TYPED: hi"

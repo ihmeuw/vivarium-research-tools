@@ -26,9 +26,12 @@ It includes:
   (``~/.claude/projects/<project>/<session-id>.jsonl`` plus a ``subagents/``
   directory), which Claude Code does not document and may change between releases.
   If a Claude Code update breaks transcript discovery, the skill reports that it
-  cannot find the transcript rather than summarizing from memory; update step 1 of
-  its ``SKILL.md`` to the new layout. ``/btw`` side questions are never written to
-  the transcript, so any review done through them is not reflected in the summary.
+  cannot find the transcript rather than summarizing from memory. Other format
+  changes show up as a summary quietly missing something. Everything the skill
+  assumes about the format is listed, with how to update it, in the "Transcript
+  format" section at the top of ``skills/summarize/scripts/tool_calls.py``.
+  ``/btw`` side questions are never written to the transcript, so any review done
+  through them is not reflected in the summary.
 
 Layout
 ======

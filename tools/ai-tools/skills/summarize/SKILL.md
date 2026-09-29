@@ -13,63 +13,37 @@ reader's question is "how much should I trust this, and where should I look?"
 
 Word limit: $ARGUMENTS
 
-## 1. Locate the transcript
+## 1. Find the session and its human input
 
-Claude Code does not document where it stores transcripts; expect the session's
-transcript at `<config-dir>/projects/*/${CLAUDE_SESSION_ID}.jsonl`, where
-`<config-dir>` is `$CLAUDE_CONFIG_DIR` if set, else `~/.claude`, and search for
-it. Use the Glob and Grep tools where they exist; some sessions lack them, so
-fall back to `find` and `grep` in Bash.
-Sub-agent transcripts, if any sub-agents ran, are expected in the sibling
-`${CLAUDE_SESSION_ID}/subagents/` directory, one `agent-<id>.jsonl` plus
-`agent-<id>.meta.json` each.
-
-The transcript is the source of truth, not your memory of the conversation:
-compaction drops early turns from context but never from the file, and the file
-records the actual model on every assistant message. If the file is missing, say
-so and stop - do not summarize from memory.
-
-The file can also exist but hold only part of the session: if it is renamed,
-moved, or deleted mid-session, Claude Code starts a new one at the same path
-with only the records written after that. Before summarizing, treat the
-transcript as partial if either is true:
-
-- Another file named `${CLAUDE_SESSION_ID}.jsonl` plus a suffix (such as
-  `.jsonl.bak`) sits beside it.
-- Something in the sibling `${CLAUDE_SESSION_ID}/` directory, a sub-agent
-  transcript or any other file, was last modified more than a minute before the
-  transcript's first timestamped record. Compare with `stat`, whose times are
-  local and whole seconds, while the transcript's are UTC; files written at
-  session start (such as `custom-title.json`) can share its first second, which
-  is why the margin is a minute.
-
-If it looks partial, say which check fired and where the rest of the session
-may be, and stop. Do not summarize the part that is there as if it were the
-whole session.
-
-**Scope ends at this skill's invocation.** Everything from the record that
-invoked `summarize` onward is out of scope. Anything before a `/clear` is in a
-different session's file and also out of scope; if the user expects it, say so.
-`/btw` side questions never enter the transcript, so review the author did
-through them is not visible; if the author mentions one, say it was not included.
-
-## 2. Extract
-
-`<cutoff>` below is always the `timestamp` field of the record in the main
-transcript that invoked `summarize`, copied exactly. The script rejects a
-cutoff it cannot parse. Run every script command exactly as shown, without
-piping its output through `head`, `grep`, or another filter: the script already
-caps what it prints and says what it cut, and a filter would drop lines
-silently.
-
-**Human input: script it.** Run:
+The session's transcript is the source of truth, not your memory of the
+conversation: compaction drops early turns from context but never from the
+file, and the file records the actual model on every assistant message. Claude
+Code does not document where or how it stores transcripts, so a bundled script
+reads them. Run each script command exactly as written in this skill, as its
+own command, with nothing added before or after it and no pipe or filter: the
+script caps what it prints and says what it cut, and anything else would need a
+permission prompt or drop lines silently. Run:
 
 ```
-python3 ${CLAUDE_SKILL_DIR}/scripts/tool_calls.py prompts <main-transcript> <cutoff>
+python3 ${CLAUDE_SKILL_DIR}/scripts/tool_calls.py prompts ${CLAUDE_SESSION_ID}
 ```
 
-It prints the session start and the working directories, then one line per
-human input up to the invocation, with its transcript line:
+It finds the transcript and takes as the cutoff the last `summarize` invocation
+in it. Then:
+
+- If the transcript is missing, it says so and exits with an error. Report that
+  and stop. Do not summarize from memory.
+- If the transcript holds only part of the session, it prints `PARTIAL
+  TRANSCRIPT` with the reasons and exits. This happens when the file was
+  renamed, moved, or deleted mid-session, since Claude Code then starts a new
+  one at the same path with only the later records. Report the reasons and
+  where the rest of the session may be, and stop. Do not summarize the part
+  that is there as if it were the whole session.
+
+Otherwise it prints the transcript path, the sub-agents directory with how many
+sub-agents started before the cutoff, the cutoff and its line, how many lines
+come before it, the session start, and the working directories. Then it prints
+one line per human input before the cutoff, with its transcript line:
 
 - `TYPED` and `MIDTURN`: prompts, including ones typed while Claude was working.
 - `COMMAND`: slash commands. `SHELL`: commands the author ran with `!`.
@@ -83,8 +57,14 @@ human input up to the invocation, with its transcript line:
 It already leaves out what the harness delivers in the same records (sub-agent
 reports, task notifications), system reminders, and compaction summaries. Long
 inputs are clipped; where the wording matters, read the full text at that line
-of the transcript. If the script fails, say so, and extract the same kinds of
-input with Read and Grep.
+of the transcript with Read. If the script fails for another reason, say so,
+and extract the same kinds of input with Read and Grep.
+
+**Scope ends at the cutoff.** Everything from the invocation onward is out of
+scope. Anything before a `/clear` is in a different session's file and also out
+of scope; if the user expects it, say so. `/btw` side questions never enter the
+transcript, so review the author did through them is not visible; if the author
+mentions one, say it was not included.
 
 Keep each input, in order, as a one-line paraphrase with its line ref, plus a
 short verbatim quote where the wording matters (a challenge, a correction, a
@@ -97,6 +77,8 @@ a Bash command by Claude that wrote that file before counting it as the
 author's. Second, Claude Code only tracks files Claude opened with the Read
 tool, so an edit to a file Claude only saw through Bash (`cat`, `sed`) leaves no
 record. The repository check below catches those.
+
+## 2. Check the repository and the session's activity
 
 **Repository state: check it on every run, short sessions included.** Work done
 outside Claude, such as an edit to a file Claude never opened with Read, or a
@@ -116,26 +98,30 @@ exactly. Do not round it or widen the window: an earlier start pulls in commits
 from before the session. Then compare with what the transcript shows Claude
 doing:
 
-- An uncommitted change to a file Claude never changed with Edit or Write, or
-  wrote through Bash, was made outside Claude.
+- If a file has uncommitted changes and the transcript shows Claude never changing
+  it, including through a Bash command such as `sed -i` or `>>`, then Claude did not
+  make that change in this session. It could be the author's, a tool's, or left
+  over from an earlier Claude session; `git status` cannot tell when it was made.
 - A commit in the log with no matching `git commit` by Claude in the transcript
-  was made outside Claude. One made after the `summarize` invocation is out of
-  scope. Git prints local time with an offset (`14:28:39-06:00`) while the
-  transcript uses UTC (`20:28:49.036Z`); convert before comparing.
+  was not made by Claude in this session. One made after the `summarize`
+  invocation is out of scope. Git prints local time with an offset
+  (`14:28:39-06:00`) while the transcript uses UTC (`20:28:49.036Z`); convert
+  before comparing.
 - Only commits inside that window count. A commit from before the session that
   a push in the session dropped or overwrote (a force-push, a rebase) is not
   work found in the repository; report it as part of that push, for example
   "the force-push dropped `6d37e707c`".
 
 This shows the repository as it is now, which may include work unrelated to the
-session, so report these as "found in the repository, not made by Claude"
-rather than attributing them to the author, unless a prompt says the author did
-it.
+session, so report these as "found in the repository, not made by Claude in
+this session" rather than attributing them to the author, unless a prompt says
+the author did it.
 
-**Short sessions: read directly.** If the main transcript is under 300 lines up
-to the `summarize` invocation and no sub-agents ran, skip the extractor and the
-sub-agent listing below: read the transcript yourself, covering the same focus
-the extractor would. The two steps above still apply.
+**Short sessions: read directly.** If the script's header shows fewer than 300
+lines before the cutoff and 0 sub-agents before the cutoff, skip the extractor
+and the sub-agent listing below: read the transcript yourself with the Read
+tool, not a script of your own, which would need a permission prompt. Cover the
+same focus the extractor would. The repository check above still applies.
 
 **Main-session activity: delegate it.** Dispatch one `simsci:_trace_extractor`
 on the main transcript. Its brief carries the absolute path, the role hint "the
@@ -149,11 +135,11 @@ the program itself) with what it reported.
 sub-agent's tool calls without a model:
 
 ```
-python3 ${CLAUDE_SKILL_DIR}/scripts/tool_calls.py agents <subagents-dir> <cutoff>
+python3 ${CLAUDE_SKILL_DIR}/scripts/tool_calls.py agents ${CLAUDE_SESSION_ID}
 ```
 
-The cutoff excludes the sub-agents this skill starts. For each sub-agent, in the
-order they started, it prints:
+It uses the same cutoff, which excludes the sub-agents this skill starts. For
+each sub-agent, in the order they started, it prints:
 
 - its type and description, model, and the start of its brief;
 - every tool call with its target (the file, command, URL, search query, or
