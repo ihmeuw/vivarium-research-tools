@@ -41,16 +41,19 @@ through them is not visible; if the author mentions one, say it was not included
 numbers, for every human prompt up to the `summarize` invocation, and read the
 full text of each match rather than a truncated line:
 
+- **Harness messages look like prompts.** The harness also delivers messages as
+  `user` records and as the `queued_command` attachments below: task
+  notifications, and sub-agent reports (`<agent-message`, often after "Another
+  Claude session sent a message:"). Skip any text that contains
+  `<task-notification>` or `<agent-message` wherever it appears; the person did
+  not type it.
 - **Typed prompts** are `user` records whose content is the person's own text
   (for example, `"role":"user","content":"`). Skip `tool_result` blocks,
-  `isCompactSummary` records, and text that is only `<system-reminder>` or
-  `<task-notification>` content.
+  `isCompactSummary` records, and text that is only `<system-reminder>`
+  content.
 - **Mid-turn prompts** are never `user` records. A prompt typed while Claude was
   working is an `attachment` record with `attachment.type` `queued_command` and
   `commandMode` `prompt`, text in `attachment.prompt` (grep `"queued_command"`).
-  The same record type also carries messages the harness queued, not the person:
-  skip those whose text starts `<task-notification>` or `<agent-message` (a
-  sub-agent's report).
 - **Answers to Claude's questions** arrive as `tool_result` blocks, not typed
   prompts, so the skip rule above would drop them. Keep the result of each
   `AskUserQuestion` call (text starting `Your questions have been answered`)
@@ -62,7 +65,11 @@ full text of each match rather than a truncated line:
   and the new content in `attachment.snippet` (grep `"edited_text_file"`). Keep
   each as a one-line note of the file and what changed. A formatter or another
   tool can also trigger one, so call them "edited outside Claude" unless a prompt
-  says the author made the change.
+  says the author made the change. Claude Code only tracks files Claude opened
+  with the Read tool, so a file Claude only saw through Bash (`cat`, `sed`) leaves
+  no record when someone else edits it. If the main extractor shows Claude
+  committing or diffing changes it never made with Edit or Write, those changes
+  came from outside Claude too; note them the same way.
 
 Keep each prompt, in order, as a one-line paraphrase with its line ref, plus a
 short verbatim quote where the wording matters (a challenge, a correction, a
@@ -82,6 +89,10 @@ sub-agent's tool calls without a model:
 ```
 python3 ${CLAUDE_SKILL_DIR}/scripts/tool_calls.py <subagents-dir> <cutoff>
 ```
+
+Run it exactly as shown, without piping the output through `head`, `grep`, or
+another filter: the script already caps what it prints and says what it cut, and
+a filter would drop agents or reports silently.
 
 `<cutoff>` is the `timestamp` field of the record in the main transcript that
 invoked `summarize` (step 1), copied exactly, so sub-agents started by this
@@ -150,6 +161,11 @@ Evidence rules - the account is only useful if it does not flatter the work:
   opened), grep the main transcript for it yourself: a digest can miss a step
   bundled into a larger command. If it did happen, cite the line and drop or
   correct the item.
+- Confirm who acted before attributing an action. Before saying the author or
+  something "outside the session" made a change, commit, or push, grep the main
+  transcript for Claude doing it (for example, the `git commit` inside a longer
+  Bash command). If Claude did it, say so, and keep separate what the author
+  changed from what Claude then committed or pushed.
 - Report the model from the transcript, never from memory.
 - Refer to the human as "the author". Do not guess pronouns.
 
