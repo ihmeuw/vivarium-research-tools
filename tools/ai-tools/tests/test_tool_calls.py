@@ -102,11 +102,18 @@ def test_task_is_formatted_like_agent(tmp_path: Path) -> None:
     assert "prompt=" not in digest
 
 
-def test_report_is_not_clipped(tmp_path: Path) -> None:
-    """A long final report is printed in full, since every claim in it gets checked."""
-    report = "finding " * 1000
+def test_report_within_the_cap_is_printed_in_full(tmp_path: Path) -> None:
+    """A report up to REPORT_CHARS is printed whole, since every claim in it gets checked."""
+    report = "x" * tool_calls.REPORT_CHARS
     digest = _digest(tmp_path, [_tool_use("t1", "SubagentHandback", {"message": report})])
-    assert report.strip() in digest
+    assert digest.endswith(f"report (handback): {report}")
+
+
+def test_report_beyond_the_cap_is_counted(tmp_path: Path) -> None:
+    """Characters past REPORT_CHARS are counted, not printed."""
+    report = "x" * (tool_calls.REPORT_CHARS + 7)
+    digest = _digest(tmp_path, [_tool_use("t1", "SubagentHandback", {"message": report})])
+    assert digest.endswith(f"{'x' * tool_calls.REPORT_CHARS} ... 7 more characters not shown")
 
 
 def test_last_text_is_the_report_without_a_handback(tmp_path: Path) -> None:
@@ -193,6 +200,34 @@ def test_one_malformed_transcript_does_not_hide_the_others(tmp_path: Path) -> No
     assert result.returncode == 0
     assert "Read: /x" in result.stdout
     assert "agent-broken.jsonl\nparse error: line 2 is not valid JSON" in result.stdout
+
+
+@pytest.mark.parametrize("agent_type", ["simsci:_trace_extractor", "_trace_extractor"])
+def test_trace_extractor_is_listed_with_its_report_omitted(tmp_path: Path, agent_type: str) -> None:
+    """A _trace_extractor, in any plugin namespace, keeps its calls but not its digest report."""
+    transcript = _write_agent(
+        tmp_path,
+        "extractor",
+        [
+            _tool_use("t1", "Read", {"file_path": "/session.jsonl"}),
+            _tool_use("t2", "SubagentHandback", {"message": "digest " * 10}),
+        ],
+        meta={"agentType": agent_type},
+    )
+    digest = tool_calls.summarize_agent(transcript)
+    assert "Read: /session.jsonl" in digest
+    assert digest.endswith("report (handback): (report omitted: transcript digest, 69 characters)")
+
+
+def test_other_agents_keep_their_report(tmp_path: Path) -> None:
+    """Only _trace_extractor reports are omitted; a similarly named agent keeps its report."""
+    transcript = _write_agent(
+        tmp_path,
+        "reviewer",
+        [_tool_use("t1", "SubagentHandback", {"message": "finding"})],
+        meta={"agentType": "simsci:_trace_extractor_v2"},
+    )
+    assert tool_calls.summarize_agent(transcript).endswith("report (handback): finding")
 
 
 def test_empty_directory(tmp_path: Path) -> None:

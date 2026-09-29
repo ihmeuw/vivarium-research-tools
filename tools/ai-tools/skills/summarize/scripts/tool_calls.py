@@ -4,9 +4,11 @@ Usage: python3 tool_calls.py <subagents-dir> [<cutoff-timestamp>]
 
 Reads every ``agent-<id>.jsonl`` (plus its ``.meta.json``) in the directory and
 prints, per sub-agent in start order: its type and description, model, brief,
-every tool call with its target, errored calls, and its full final report. No
-model is involved, so this is the cheap evidence for "what did this sub-agent
-actually check".
+every tool call with its target, errored calls, and its final report. No model
+is involved, so this is the cheap evidence for "what did this sub-agent
+actually check". ``_trace_extractor`` sub-agents are listed like any other, but
+their reports are omitted: each is a digest of another transcript, often long,
+and says nothing the transcripts themselves do not.
 
 The optional cutoff is an ISO-8601 timestamp with a timezone. Sub-agents whose
 first record is at or after it are skipped, so that ``summarize`` can pass the
@@ -21,6 +23,8 @@ from pathlib import Path
 BRIEF_CHARS = 400
 TARGET_CHARS = 160
 MAX_CALLS = 40
+REPORT_CHARS = 5000
+DIGEST_AGENT = "_trace_extractor"
 
 # The input fields that name what a tool call touched. Tools not listed here,
 # including Grep, Glob, and MCP tools, show every argument, because their
@@ -97,6 +101,24 @@ def _started_at(transcript: Path) -> datetime | None:
     return _parse_timestamp(timestamp) if timestamp else None
 
 
+def _meta(transcript: Path) -> dict:
+    """Return a transcript's ``.meta.json`` contents, or an empty dict if it has none."""
+    meta_path = transcript.with_suffix(".meta.json")
+    return json.loads(meta_path.read_text()) if meta_path.exists() else {}
+
+
+def _is_digest(meta: dict) -> bool:
+    # Match any plugin namespace, e.g. simsci:_trace_extractor.
+    return meta.get("agentType", "").split(":")[-1] == DIGEST_AGENT
+
+
+def _report(text: str) -> str:
+    text = _normalize(text)
+    if len(text) <= REPORT_CHARS:
+        return text
+    return f"{text[:REPORT_CHARS]} ... {len(text) - REPORT_CHARS} more characters not shown"
+
+
 def summarize_agent(transcript: Path) -> str:
     """Return the tool-call digest for one sub-agent transcript.
 
@@ -105,8 +127,7 @@ def summarize_agent(transcript: Path) -> str:
     ValueError
         If a line of the transcript is not valid JSON.
     """
-    meta_path = transcript.with_suffix(".meta.json")
-    meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+    meta = _meta(transcript)
     models: set[str] = set()
     brief = ""
     calls: list[tuple[int, str, str, str]] = []
@@ -147,7 +168,7 @@ def summarize_agent(transcript: Path) -> str:
                                 (line_number, block.get("id", ""), name, _target(name, tool_input))
                             )
 
-    # Render the header, the capped call list with error flags, and the full report.
+    # Render the header, the capped call list with error flags, and the capped report.
     lines_out = [
         f"## {transcript.name}",
         f"type: {meta.get('agentType', '?')} | description: {meta.get('description', '?')}",
@@ -161,7 +182,12 @@ def summarize_agent(transcript: Path) -> str:
     if len(calls) > MAX_CALLS:
         lines_out.append(f"  ... {len(calls) - MAX_CALLS} more calls not shown")
     report_source = "handback" if handback else "last text (no handback)"
-    lines_out.append(f"report ({report_source}): {_normalize(handback or last_text)}")
+    report = _normalize(handback or last_text)
+    if _is_digest(meta):
+        report = f"(report omitted: transcript digest, {len(report)} characters)"
+    else:
+        report = _report(report)
+    lines_out.append(f"report ({report_source}): {report}")
     return "\n".join(lines_out)
 
 

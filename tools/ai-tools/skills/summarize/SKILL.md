@@ -47,13 +47,22 @@ full text of each match rather than a truncated line:
   `<task-notification>` content.
 - **Mid-turn prompts** are never `user` records. A prompt typed while Claude was
   working is an `attachment` record with `attachment.type` `queued_command` and
-  `commandMode` `prompt`, text in `attachment.prompt` (grep `"queued_command"`;
-  skip those whose text is a `<task-notification>`).
+  `commandMode` `prompt`, text in `attachment.prompt` (grep `"queued_command"`).
+  The same record type also carries messages the harness queued, not the person:
+  skip those whose text starts `<task-notification>` or `<agent-message` (a
+  sub-agent's report).
 - **Answers to Claude's questions** arrive as `tool_result` blocks, not typed
   prompts, so the skip rule above would drop them. Keep the result of each
   `AskUserQuestion` call (text starting `Your questions have been answered`)
   and each rejected tool call where the user said how to proceed (text starting
   `The user doesn't want to proceed`); both are decisions the author made.
+- **Direct edits** by the author, outside Claude, are not prompts. Claude Code
+  records a file that changed on disk after Claude read it as an `attachment`
+  record with `attachment.type` `edited_text_file`, the path in `attachment.filename`,
+  and the new content in `attachment.snippet` (grep `"edited_text_file"`). Keep
+  each as a one-line note of the file and what changed. A formatter or another
+  tool can also trigger one, so call them "edited outside Claude" unless a prompt
+  says the author made the change.
 
 Keep each prompt, in order, as a one-line paraphrase with its line ref, plus a
 short verbatim quote where the wording matters (a challenge, a correction, a
@@ -63,8 +72,9 @@ stated check).
 on the main transcript. Its brief carries the absolute path, the role hint "the
 main session", the `subagents/` directory, and this focus: the distinct
 `message.model` values; web fetches and searches (URL or query); files read that
-are sources or data rather than code; and each sub-agent dispatch's description
-and one-line result.
+are sources or data rather than code; each sub-agent dispatch's description and
+one-line result; and each command run to check behavior (tests, validators,
+the program itself) with what it reported.
 
 **Sub-agent activity: script it.** While the extractor runs, list every
 sub-agent's tool calls without a model:
@@ -81,12 +91,15 @@ sub-agent, in the order they started, it prints:
 - its type and description, model, and the start of its brief;
 - every tool call with its target (the file, command, URL, search query, or
   dispatched agent, and every argument of Grep, Glob, and MCP calls) and
-  whether it errored, up to 40 calls with a count of the rest;
-- its full final report.
+  whether it errored, up to a call limit with a count of the rest;
+- its final report, up to a character limit with a count of the rest.
 
 "no sub-agent transcripts found" means none ran. An agent marked "parse error"
 could not be read, and one marked "start time unknown" was included without
-checking the cutoff.
+checking the cutoff. `_trace_extractor` sub-agents, such as those of an earlier
+`summarize` run, are listed with their tool calls but with the report omitted:
+each report is a long digest of another transcript, which you read directly
+instead.
 
 Compare each report against its tool calls. The listing shows which tools and
 targets a sub-agent used, never what those calls returned. So it settles one
@@ -95,8 +108,11 @@ the listing either shows (it read the file, ran the command) or contradicts (it
 says "verified" but opened nothing that could verify it; record that as not
 verified). A claim that rests on what a call returned, such as a
 value, a count, or a quoted passage, is not settled even when the right file was
-opened. For those, and for agents with calls not shown or a parse error,
-dispatch `simsci:_trace_extractor` on that sub-agent's transcript, with its role
+opened, unless the main session checked it independently afterwards (it ran a
+test or command that exercised the claim, or read the file itself; the main
+extractor's verification commands show this). For the claims left, and for
+agents with calls or report not shown in full or a parse error, dispatch
+`simsci:_trace_extractor` on that sub-agent's transcript, with its role
 hint (`agentType` and description) and the focus: what it was asked to check,
 what it actually opened or recomputed, and what it reported finding.
 Dispatch these in one message, at most 20 at a time (Claude Code's default
@@ -112,7 +128,8 @@ one extractor per sub-agent, batched the same way.
 From the digests, build the full account for yourself - not for output:
 
 - **Setup:** model(s) as recorded, number of human prompts, sub-agents used.
-- **What the human directed:** the arc of the work in a few steps.
+- **What the human directed:** the arc of the work in a few steps, including
+  the files the author edited directly.
 - **What the human caught:** each challenge or correction that changed a number
   or a conclusion, with its severity.
 - **What automated checks caught:** sub-agent findings that changed the work.
@@ -128,6 +145,11 @@ Evidence rules - the account is only useful if it does not flatter the work:
   say which it was.
 - A sub-agent "checked" something only if its transcript shows it opened or
   recomputed it, not merely that its report says so.
+- Confirm every absence before relying on it. When a not-verified item rests on
+  a digest saying something did not happen (never ran, never pushed, never
+  opened), grep the main transcript for it yourself: a digest can miss a step
+  bundled into a larger command. If it did happen, cite the line and drop or
+  correct the item.
 - Report the model from the transcript, never from memory.
 - Refer to the human as "the author". Do not guess pronouns.
 
