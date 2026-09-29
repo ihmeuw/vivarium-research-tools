@@ -29,6 +29,24 @@ compaction drops early turns from context but never from the file, and the file
 records the actual model on every assistant message. If the file is missing, say
 so and stop - do not summarize from memory.
 
+The file can also exist but hold only part of the session: if it is renamed,
+moved, or deleted mid-session, Claude Code starts a new one at the same path
+with only the records written after that. Before summarizing, treat the
+transcript as partial if either is true:
+
+- Another file named `${CLAUDE_SESSION_ID}.jsonl` plus a suffix (such as
+  `.jsonl.bak`) sits beside it.
+- Something in the sibling `${CLAUDE_SESSION_ID}/` directory, a sub-agent
+  transcript or any other file, was last modified more than a minute before the
+  transcript's first timestamped record. Compare with `stat`, whose times are
+  local and whole seconds, while the transcript's are UTC; files written at
+  session start (such as `custom-title.json`) can share its first second, which
+  is why the margin is a minute.
+
+If it looks partial, say which check fired and where the rest of the session
+may be, and stop. Do not summarize the part that is there as if it were the
+whole session.
+
 **Scope ends at this skill's invocation.** Everything from the record that
 invoked `summarize` onward is out of scope. Anything before a `/clear` is in a
 different session's file and also out of scope; if the user expects it, say so.
