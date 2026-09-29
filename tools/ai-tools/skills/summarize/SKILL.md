@@ -174,10 +174,10 @@ Evidence rules - the account is only useful if it does not flatter the work:
 Rewrite pass 1 under the word limit given above, or **250 words** if none was
 given. Keep the not-verified items first and complete - cut everything
 else before cutting one of them. Count the words with `wc -w` (pass the draft on
-a quoted heredoc, `wc -w <<'EOF'`) rather than estimating, and cut again if
-over. If the
-word limit is too small to hold even the not-verified items, ask permission to
-exceed it.
+a quoted heredoc, `wc -w <<'EOF'`) rather than estimating. The limit is hard:
+while the count is over, cut and count again, and print only a draft whose last
+count is at or under the limit. If the word limit is too small to hold even the
+not-verified items, ask permission to exceed it.
 
 ```
 **AI use:** <one sentence: tool, model(s), roughly N prompts, sub-agents if any>
