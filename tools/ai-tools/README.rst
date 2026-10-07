@@ -16,7 +16,7 @@ It includes:
   summary of a Claude Code session (what was asked, how much the human steered and
   reviewed, and what was and was not verified). Facts such as the prompts, models,
   and commands run are read from the session transcript by
-  ``skills/summarize/scripts/session_facts.py``; the word limit defaults to 250.
+  ``skills/summarize/scripts/session_facts.py``; the word limit defaults to 400.
 
 Layout
 ======

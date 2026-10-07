@@ -3,17 +3,23 @@
 The transcripts below are small hand-written imitations of real Claude Code
 transcripts.  Each record shape here was copied from a real transcript; if Claude
 Code changes its format, update these records to match and fix the script.
+
+These tests cannot detect such a change, because they never see a real
+transcript. The script's own format warnings (``format_warnings``) do that, every
+time it runs against a real session.
 """
 
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parents[1] / "skills" / "summarize" / "scripts"))
+SCRIPTS = Path(__file__).parents[1] / "skills" / "summarize" / "scripts"
+sys.path.insert(0, str(SCRIPTS))
 
 import session_facts  # noqa: E402
 
@@ -199,7 +205,7 @@ def test_digest_includes_subagents(tmp_path: Path, records: list[dict]) -> None:
         json.dumps({"agentType": "general-purpose", "description": "Audit arithmetic"})
     )
 
-    digest = session_facts.build_digest(transcript, include_conversation=False)
+    digest = session_facts.build_digest(transcript, include_replies=False)
 
     assert "Subagents: 1" in digest
     assert "- general-purpose: Audit arithmetic (claude-opus-5-5; 1 commands, 0 files edited)" in digest
@@ -207,12 +213,13 @@ def test_digest_includes_subagents(tmp_path: Path, records: list[dict]) -> None:
     assert "Human prompts: 2 (" in digest
     assert "Tool calls denied by the human: Bash x1" in digest
     assert "Compactions (earlier context summarized): 1; 2026-10-01 11:00 UTC" in digest
-    assert "Here is the comparison." not in digest
+    # The fixture session was compacted, so Claude's replies are included automatically.
+    assert "- Here is the comparison." in digest
 
 
-def test_digest_conversation_flag_adds_assistant_text(tmp_path: Path, records: list[dict]) -> None:
+def test_include_replies_adds_assistant_text(tmp_path: Path, records: list[dict]) -> None:
     transcript = write_transcript(tmp_path / "session.jsonl", records)
-    digest = session_facts.build_digest(transcript, include_conversation=True)
+    digest = session_facts.build_digest(transcript, include_replies=True)
     assert "## Claude's last message before each prompt" in digest
     assert "- Here is the comparison." in digest
     assert "WARNING" not in digest
@@ -221,13 +228,13 @@ def test_digest_conversation_flag_adds_assistant_text(tmp_path: Path, records: l
 
 def test_long_replies_are_kept_in_full_under_the_budget() -> None:
     reply = "word " * 1000
-    lines = session_facts.conversation_lines([reply])
+    lines = session_facts.reply_lines([reply])
     assert lines[1] == "- " + reply.strip()
 
 
 def test_replies_over_the_budget_are_truncated_with_a_warning(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(session_facts, "REPLY_WORD_BUDGET", 10)
-    lines = session_facts.conversation_lines(["word " * 20, "short reply"])
+    lines = session_facts.reply_lines(["word " * 20, "short reply"])
     assert lines[1].startswith("WARNING: these 22 words of replies were truncated to about 30 characters")
     assert lines[2] == "- " + ("word " * 20)[:27] + "..."
     assert lines[3] == "- short reply"
@@ -244,3 +251,131 @@ def test_replies_keep_only_the_last_message_of_each_turn() -> None:
         ]
     )
     assert [reply for reply in facts["replies"] if reply] == ["Done with first.", "Done with second."]
+
+
+def test_replies_are_omitted_without_compaction_or_flag(tmp_path: Path) -> None:
+    records = [human("first"), assistant({"type": "text", "text": "Done with first."})]
+    transcript = write_transcript(tmp_path / "session.jsonl", records)
+    assert "Done with first." not in session_facts.build_digest(transcript, include_replies=False)
+    assert "- Done with first." in session_facts.build_digest(transcript, include_replies=True)
+
+
+def test_slash_command_without_arguments() -> None:
+    facts = session_facts.summarize_records(
+        [human("<command-message>clear</command-message>\n<command-name>/clear</command-name>")]
+    )
+    assert [text for _, text in facts["prompts"]] == ["/clear"]
+
+
+def test_bare_summarize_invocation_is_dropped() -> None:
+    facts = session_facts.summarize_records(
+        [human("<command-name>/summarize</command-name>\n<command-args></command-args>")]
+    )
+    assert facts["prompts"] == []
+
+
+def test_non_bash_tool_errors_are_counted() -> None:
+    facts = session_facts.summarize_records(
+        [assistant(tool_use("t1", "Read", file_path="/missing")), tool_result("t1", "File not found", is_error=True)]
+    )
+    assert facts["tool_errors"] == 1
+    assert facts["commands"] == []
+
+
+def test_result_without_matching_call_is_an_unknown_tool() -> None:
+    facts = session_facts.summarize_records([tool_result("orphan", DENIAL, is_error=True)])
+    assert facts["denials"] == ["unknown tool"]
+
+
+def test_long_prompts_are_truncated_in_the_digest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(session_facts, "PROMPT_CHARACTER_LIMIT", 10)
+    transcript = write_transcript(tmp_path / "session.jsonl", [human("abcdefghijklmnop")])
+    assert "1. [10:00] abcdefg..." in session_facts.build_digest(transcript, include_replies=False)
+
+
+def test_command_list_is_capped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(session_facts, "MAX_COMMANDS_LISTED", 2)
+    records = [human("go")]
+    for number in range(3):
+        records += [assistant(tool_use(f"t{number}", "Bash", command=f"step {number}")), tool_result(f"t{number}", "ok")]
+    digest = session_facts.build_digest(write_transcript(tmp_path / "session.jsonl", records), include_replies=False)
+    assert "Shell commands: 3 (0 failed)" in digest
+    assert "- ... 1 earlier commands omitted" in digest
+    assert "step 0" not in digest
+    assert "- [ok] step 2" in digest
+
+
+def test_subagent_commands_are_capped_and_missing_meta_is_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(session_facts, "MAX_SUBAGENT_COMMANDS_LISTED", 1)
+    transcript = write_transcript(tmp_path / "session.jsonl", [human("go")])
+    write_transcript(
+        tmp_path / "session" / "subagents" / "agent-a1.jsonl",
+        [
+            assistant(tool_use("s1", "Bash", command="first")),
+            tool_result("s1", "ok"),
+            assistant(tool_use("s2", "Bash", command="second")),
+            tool_result("s2", "ok"),
+        ],
+    )
+    (lines,) = session_facts.describe_subagents(transcript)
+    assert lines[0].startswith("- unknown type: ")
+    assert lines[1:] == ["    - [ok] first", "    - ... 1 more"]
+
+
+def test_digest_without_timestamps_or_prompts(tmp_path: Path) -> None:
+    records = [{"type": "assistant", "message": {"model": "claude-opus-5-5", "content": []}}]
+    digest = session_facts.build_digest(write_transcript(tmp_path / "session.jsonl", records), include_replies=False)
+    assert "Span:" not in digest
+    assert "Human prompts: 0 (0 words)" in digest
+    assert "WARNING: no record has a timestamp" in digest
+
+
+def test_normal_transcript_has_no_format_warnings(records: list[dict], facts: dict) -> None:
+    assert session_facts.format_warnings(records, facts) == []
+
+
+def test_missing_origin_field_is_flagged() -> None:
+    records = [{"type": "user", "timestamp": "2026-10-01T10:00:00Z", "message": {"content": "hello"}}]
+    facts = session_facts.summarize_records(records)
+    (warning,) = session_facts.format_warnings(records, facts)
+    assert "human prompts cannot be identified" in warning
+    assert "claude -p" in warning
+
+
+def test_missing_model_field_is_flagged() -> None:
+    records = [human("go"), {"type": "assistant", "timestamp": "2026-10-01T10:00:00Z", "message": {"content": []}}]
+    facts = session_facts.summarize_records(records)
+    (warning,) = session_facts.format_warnings(records, facts)
+    assert "none has a model field" in warning
+
+
+def test_placeholder_model_is_not_flagged() -> None:
+    records = [human("go"), assistant(model="<synthetic>")]
+    assert session_facts.format_warnings(records, session_facts.summarize_records(records)) == []
+
+
+def test_unrecognized_records_are_flagged() -> None:
+    records = [{"type": "something-new", "timestamp": "2026-10-01T10:00:00Z"}]
+    (warning,) = session_facts.format_warnings(records, session_facts.summarize_records(records))
+    assert "no user or assistant records" in warning
+
+
+def test_command_line_reports_a_missing_session(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [sys.executable, str(SCRIPTS / "session_facts.py"), "missing-id"],
+        capture_output=True,
+        text=True,
+        env={"CLAUDE_CONFIG_DIR": str(tmp_path)},
+    )
+    assert result.returncode == 1
+    assert "No transcript found for session 'missing-id'" in result.stderr
+
+
+def test_command_line_include_replies_flag(tmp_path: Path) -> None:
+    records = [human("first"), assistant({"type": "text", "text": "Done with first."})]
+    transcript = write_transcript(tmp_path / "session.jsonl", records)
+    command = [sys.executable, str(SCRIPTS / "session_facts.py"), str(transcript)]
+    assert "Done with first." not in subprocess.run(command, capture_output=True, text=True).stdout
+    assert "- Done with first." in subprocess.run(command + ["--include-replies"], capture_output=True, text=True).stdout

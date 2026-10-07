@@ -1,6 +1,6 @@
 """Count the words in a drafted summary that count toward the word limit.
 
-The session line, the collapsed prompt list, and anything after it (the note to
+The Session section, the prompt list, and anything after it (the note to
 the user) do not count.  Models are poor at counting their own words, so the
 ``summarize`` skill runs this instead of estimating.
 
@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 def count_summary_words(text: str) -> int:
-    """Count the words in a summary, excluding the session line, prompt list, and note.
+    """Count the words in a summary, excluding the Session section, prompt list, and note.
 
     Parameters
     ----------
@@ -28,8 +28,10 @@ def count_summary_words(text: str) -> int:
     -------
         The number of words that count toward the limit.
     """
-    summary = text.split("<details>")[0]
-    summary = re.sub(r"(?m)^\*\*Session:\*\*.*$", "", summary)
+    # Remove the prompts list (which is in a <details> block and always at the end of the summary.
+    summary = re.split(r"(?m)^.*<details>.*Prompts.*$", text, maxsplit=1)[0]
+    # The Session section runs until the next bold label, e.g. **Summary**.
+    summary = re.sub(r"(?ms)^\*\*Session:?\*\*.*?(?=^\*\*|\Z)", "", summary)
     # Bullet markers and other punctuation-only tokens are not words.
     return sum(1 for token in summary.split() if re.search(r"\w", token))
 
