@@ -1,0 +1,31 @@
+# Run the `tools/ai-tools` plugin's tests on every PR that touches the plugin.
+#
+# The tests cover the helper scripts bundled with the skills (e.g. the
+# summarize skill's transcript parser). The scripts use only the Python
+# standard library; pytest is the only dependency.
+
+name: Test AI Tools
+
+on:
+  pull_request:
+    paths: ['tools/ai-tools/**', '.github/workflows/test-ai-tools.yml']
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Test simsci-research
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install pytest
+        run: python -m pip install pytest
+
+      - name: Run tests
+        run: python -m pytest tools/ai-tools/tests

@@ -12,13 +12,18 @@ It includes:
 
 **Skills**
 
-- ``/simsci-research:summarize`` TBD
+- ``/simsci-research:summarize [word limit] [session ID]``: a short, reviewer-first
+  summary of a Claude Code session (what was asked, how much the human steered and
+  reviewed, and what was and was not verified). Facts such as the prompts, models,
+  and commands run are read from the session transcript by
+  ``skills/summarize/scripts/session_facts.py``; the word limit defaults to 250.
 
 Layout
 ======
 
 - ``tools/ai-tools/.claude-plugin/plugin.json``: plugin manifest
 - ``tools/ai-tools/skills/``: Claude Code skills
+- ``tools/ai-tools/tests/``: tests for scripts bundled with the skills
   (run ``python3 -m pytest tools/ai-tools/tests``; CI runs them on every PR that
   touches ``tools/ai-tools/``)
 - ``tools/ai-tools/CHANGELOG.rst``: history of plugin changes
