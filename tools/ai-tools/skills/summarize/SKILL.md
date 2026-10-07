@@ -82,8 +82,9 @@ Guidance for each part:
   everything before it, so give the dates.
 - **Summary**: orient the reviewer in a few seconds. Give one short sentence
   per outcome (a PR, a document, a ticket, a decision), naming PRs and tickets
-  so the reviewer can find them. Leave caveats and checks to the sections below
-  rather than repeating them here.
+  so the reviewer can find them. Unrelated outcomes never share a bullet, even
+  to save words. Leave caveats and checks to the sections below rather than
+  repeating them here.
 - **Not verified** comes right after the summary because it is what a reviewer
   most needs. Be specific ("the 4.57 intercept was never checked against
   Crider 2014 Table F"), not generic ("some numbers may be wrong"). Be thorough:
@@ -99,13 +100,15 @@ Guidance for each part:
 - **Human involvement**: report evidence, not a rating. Name each substantive
   correction or rejection specifically; "the human rejected two suggestions"
   tells a reviewer nothing, "the human rejected adding a setter and a new
-  protocol" does. List every substantive one. When there are many, group small
-  ones of the same kind into one bullet, e.g. "questioned 6 rewritten methods
-  line by line (`initialize_state`, ...)". Other useful evidence: questions they
-  answered, tool calls they denied or interrupted, and the permission mode (in
-  `auto` or `bypassPermissions`, Claude acted without per-action approval; in
-  `default` or `acceptEdits` the human approved some actions). Don't guess at
-  review that happened outside the session; say it is unknown.
+  protocol" does. List every substantive one, one bullet each. The only exception
+  is several small items of the same kind, which can share a bullet, e.g.
+  "questioned 6 rewritten methods line by line (`initialize_state`, ...)".
+  Unrelated items never share a bullet, even to save words. Other useful
+  evidence: questions they answered, tool calls they denied or interrupted, and
+  the permission mode (in `auto` or `bypassPermissions`, Claude acted without
+  per-action approval; in `default` or `acceptEdits` the human approved some
+  actions). Don't guess at review that happened outside the session; say it is
+  unknown.
 - **Prompt list**: copy every prompt from the digest as written; it already
   truncates long ones. The `<details>` tag makes the list collapsed when pasted
   into GitHub. Replace anything that looks like a credential (tokens, passwords,
