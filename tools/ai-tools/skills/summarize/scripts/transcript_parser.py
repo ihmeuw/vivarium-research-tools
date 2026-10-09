@@ -100,22 +100,42 @@ def transcripts_folder() -> Path:
 
 
 def read_records(path: Path) -> list[dict]:
-    """Read every JSON record in a transcript, skipping lines that are not one.
+    """Read every JSON record in a transcript, skipping lines that are not one."""
+    return read_records_and_skips(path)[0]
+
+
+def read_records_and_skips(path: Path) -> tuple[list[dict], int]:
+    """Read every JSON record in a transcript, and count the lines that are not one.
 
     A damaged line (invalid JSON, invalid UTF-8, or JSON that is not an object) is
     skipped rather than failing the whole file. Every summary also reads the
     user's other recent sessions, so one damaged file must not break them all.
+    Blank lines are ignored. A damaged last line is skipped but not counted:
+    Claude Code may still be writing it, as it is for the session being summarized.
+
+    Parameters
+    ----------
+    path
+        Path to the transcript.
+
+    Returns
+    -------
+        The records, and how many lines before the last one could not be read.
     """
     records = []
+    unreadable = []
     with path.open(errors="replace") as file:
-        for line in file:
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(record, dict):
-                records.append(record)
-    return records
+        lines = [line for line in file if line.strip()]
+    for index, line in enumerate(lines):
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            record = None
+        if isinstance(record, dict):
+            records.append(record)
+        else:
+            unreadable.append(index)
+    return records, sum(1 for index in unreadable if index != len(lines) - 1)
 
 
 def content_blocks(record: dict) -> list[dict]:
@@ -311,6 +331,11 @@ def describe_subagents(transcript: Path) -> list[dict]:
     Subagent transcripts live in ``<session-id>/subagents/agent-<id>.jsonl`` next to
     the main transcript, with a sibling ``agent-<id>.meta.json`` naming its type and
     the ID of the tool call that dispatched it.
+
+    Unreadable lines in a subagent transcript are skipped silently: unlike the main
+    transcript's, they do not count toward the digest's NOTE about unreadable lines.
+    Damage there can hide some of a subagent's commands, but nothing the human
+    typed or reviewed, which is what the summary reports on.
 
     Parameters
     ----------

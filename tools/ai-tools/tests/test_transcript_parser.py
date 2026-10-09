@@ -68,6 +68,19 @@ class TestReadRecords:
         path.write_text("")
         assert transcript_parser.read_records(path) == []
 
+    def test_unreadable_lines_before_the_last_are_counted(self, tmp_path: Path) -> None:
+        path = tmp_path / "session.jsonl"
+        path.write_text('{"type": "a"}\nnot json\n{"type": "b"}\n{"type": "c", "trun')
+        records, unreadable = transcript_parser.read_records_and_skips(path)
+        assert records == [{"type": "a"}, {"type": "b"}]
+        # The damaged last line may still be being written, so it is not counted.
+        assert unreadable == 1
+
+    def test_blank_lines_are_ignored(self, tmp_path: Path) -> None:
+        path = tmp_path / "session.jsonl"
+        path.write_text('{"type": "a"}\n\n   \n{"type": "b"}\n\n')
+        assert transcript_parser.read_records_and_skips(path) == ([{"type": "a"}, {"type": "b"}], 0)
+
 
 class TestSummarizeRecords:
     """Extracting facts from a transcript's records."""

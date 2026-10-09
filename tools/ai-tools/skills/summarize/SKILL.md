@@ -33,9 +33,7 @@ If the arguments name a session other than this one (step 1), add
 `--include-replies` to the `session_facts.py` command above. It adds Claude's
 last message before each prompt so you can see what happened. Note that the
 script adds these messages on its own if the session was compacted, since the
-earlier details are no longer in your context either. If the digest warns that
-those messages were truncated, the session was very large and details may be
-missing; say so in the note at the end.
+earlier details are no longer in your context either.
 
 The digest is the source of truth for counts, models, prompts, and which
 commands ran. Your memory of the session is not: models misremember which model
@@ -146,11 +144,12 @@ counted toward the limit):
 
 - If you went over the limit, give the counted number and why, e.g. "This is
   520 words, over the 400 limit, to keep all 9 unverified items."
-- If the digest warned that Claude's messages were truncated, say the summary
-  may be incomplete.
-- If the digest has any other WARNING line, quote it, say the counts in the
-  summary may be wrong, and ask the user to send the warning to the maintainers
-  of the `simsci-research` plugin.
+- If the digest has NOTE lines, part of the input was missing: say the summary
+  may be incomplete or its counts may be low, as the NOTE describes.
+- If the digest has WARNING lines, Claude Code may have changed its transcript
+  format: quote each one, say the counts in the summary may be wrong, and ask
+  the user to send the warning to the maintainers of the `simsci-research`
+  plugin.
 - If you went over the limit or your revision in step 4 dropped detail, say how
   to get more: rerun with a higher limit, e.g. "For more detail, run
   `/simsci-research:summarize <word_count>`", where `<word_count>` is twice the

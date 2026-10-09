@@ -23,7 +23,7 @@ from pathlib import Path
 from transcript_parser import (
     COMMAND_CHARACTER_LIMIT,
     find_transcript,
-    read_records,
+    read_records_and_skips,
     shorten,
     timestamp_of,
     summarize_records,
@@ -65,7 +65,7 @@ def build_digest(transcript: Path, include_replies: bool) -> str:
     -------
         The digest as markdown text.
     """
-    records = read_records(transcript)
+    records, unreadable = read_records_and_skips(transcript)
     facts = summarize_records(records)
     timestamps = [t for t in (timestamp_of(r) for r in records) if t]
     prompts = facts["prompts"]
@@ -80,15 +80,18 @@ def build_digest(transcript: Path, include_replies: bool) -> str:
     subagent_count = len(facts["subagent_calls"]) + sum(1 for s in subagents if s["tool_use_id"] not in call_ids)
     without_transcript = [call for call in facts["subagent_calls"] if call["id"] not in transcript_ids]
 
+    # WARNING lines mean Claude Code may have changed its transcript format; NOTE
+    # lines mean part of this session's input is missing. SKILL.md handles each.
     lines = [f"# Session facts: {transcript.stem}", *format_warnings(records, facts, len(subagents))]
-    # The same check maintainers can run by hand, over this user's recent sessions.
-    # It prints nothing unless a fact has stopped appearing.
+    # Checks the user's recent sessions; prints nothing unless a fact has stopped appearing.
     flagged = stale_facts(recent_transcripts())
     lines += [
         f"WARNING: across your sessions from the last {RECENT_DAYS} days, {description}. The Claude Code "
         "transcript format may have changed; see transcript_format.py."
         for description in flagged
     ]
+    if unreadable:
+        lines.append(f"NOTE: {unreadable} transcript lines could not be read, so counts may be low.")
     if facts["title"]:
         lines.append(f"Title: {facts['title']}")
     if timestamps:
@@ -149,7 +152,7 @@ def reply_lines(replies: list[str]) -> list[str]:
     character_limit = REPLY_WORD_BUDGET * 6 // len(replies)
     lines = [
         "## Claude's last message before each prompt, and at the end",
-        f"WARNING: these {total_words} words of replies were truncated to about "
+        f"NOTE: these {total_words} words of replies were truncated to about "
         f"{character_limit} characters each. Details may be missing; tell the user "
         "the summary may be incomplete.",
     ]

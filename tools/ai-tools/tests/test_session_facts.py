@@ -120,7 +120,10 @@ class TestBuildDigest:
         damaged.parent.mkdir(parents=True)
         damaged.write_bytes(b'\xff\xfe\n[]\n{"type": "user", "origin": {"kind": "human"}, "timestamp": "yesterday"}\n')
         transcript = write_transcript(projects / "session.jsonl", [human("go")])
-        assert "Human prompts: 1 (" in session_facts.build_digest(transcript, include_replies=False)
+        digest = session_facts.build_digest(transcript, include_replies=False)
+        assert "Human prompts: 1 (" in digest
+        # Damage in another session is not this summary's problem.
+        assert "NOTE" not in digest
 
     def test_span_line_gives_times_and_duration(self, tmp_path: Path) -> None:
         short = write_transcript(
@@ -170,6 +173,31 @@ class TestBuildDigest:
         transcript = write_transcript(projects / "session.jsonl", [human("go")])
         assert "private text from another project" not in session_facts.build_digest(transcript, include_replies=True)
 
+    def test_unreadable_lines_add_a_note_not_a_warning(self, tmp_path: Path) -> None:
+        transcript = tmp_path / "session.jsonl"
+        transcript.write_text(json.dumps(human("go")) + "\nnot json\n" + json.dumps(human("more")) + "\n")
+        digest = session_facts.build_digest(transcript, include_replies=False)
+        assert "NOTE: 1 transcript lines could not be read, so counts may be low." in digest
+        assert "WARNING" not in digest
+
+    @pytest.mark.parametrize(
+        "damaged_line",
+        [b"not json", b"\xff\xfe invalid utf-8", b"[]", b"5", b'"just a string"'],
+        ids=["invalid json", "invalid utf-8", "json list", "json number", "json string"],
+    )
+    def test_every_kind_of_skipped_line_adds_a_note(self, tmp_path: Path, damaged_line: bytes) -> None:
+        transcript = tmp_path / "session.jsonl"
+        good = [json.dumps(human(text)).encode() for text in ("go", "more")]
+        transcript.write_bytes(b"\n".join([good[0], damaged_line, good[1]]) + b"\n")
+        digest = session_facts.build_digest(transcript, include_replies=False)
+        assert "NOTE: 1 transcript lines could not be read, so counts may be low." in digest
+        assert "Human prompts: 2 (" in digest
+
+    def test_damaged_last_line_adds_no_note(self, tmp_path: Path) -> None:
+        transcript = tmp_path / "session.jsonl"
+        transcript.write_text(json.dumps(human("go")) + "\n" + json.dumps(human("more"))[:20])
+        assert "NOTE" not in session_facts.build_digest(transcript, include_replies=False)
+
 
 class TestReplies:
     """Whether and how Claude's replies are included."""
@@ -187,10 +215,10 @@ class TestReplies:
         lines = session_facts.reply_lines([reply])
         assert lines[1] == "- " + reply.strip()
 
-    def test_replies_over_the_budget_are_truncated_with_a_warning(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_replies_over_the_budget_are_truncated_with_a_note(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(session_facts, "REPLY_WORD_BUDGET", 10)
         lines = session_facts.reply_lines(["word " * 20, "short reply"])
-        assert lines[1].startswith("WARNING: these 22 words of replies were truncated to about 30 characters")
+        assert lines[1].startswith("NOTE: these 22 words of replies were truncated to about 30 characters")
         assert lines[2] == "- " + ("word " * 20)[:27] + "..."
         assert lines[3] == "- short reply"
 
