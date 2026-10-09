@@ -129,9 +129,9 @@ class TestSummarizeRecords:
 
     def test_slash_command_without_arguments(self) -> None:
         facts = transcript_parser.summarize_records(
-            [human("<command-message>clear</command-message>\n<command-name>/clear</command-name>")]
+            [human("<command-message>simsci:pr-prep</command-message>\n<command-name>/simsci:pr-prep</command-name>")]
         )
-        assert [text for _, text in facts["prompts"]] == ["/clear"]
+        assert [text for _, text in facts["prompts"]] == ["/simsci:pr-prep"]
 
     def test_bare_summarize_invocation_is_dropped(self) -> None:
         facts = transcript_parser.summarize_records(
