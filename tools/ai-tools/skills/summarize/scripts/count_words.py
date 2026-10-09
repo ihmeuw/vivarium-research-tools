@@ -28,7 +28,8 @@ def count_summary_words(text: str) -> int:
     -------
         The number of words that count toward the limit.
     """
-    # Remove the prompts list (which is in a <details> block and always at the end of the summary.
+    # Cut at the collapsed prompt list; it and everything after it (the closing note,
+    # including any NOTE or FORMAT WARNING lines) don't count toward the limit.
     summary = re.split(r"(?m)^.*<details>.*Prompts.*$", text, maxsplit=1)[0]
     # The Session section runs until the next bold label, e.g. **Summary**.
     summary = re.sub(r"(?ms)^\*\*Session:?\*\*.*?(?=^\*\*|\Z)", "", summary)
