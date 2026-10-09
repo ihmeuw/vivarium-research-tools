@@ -8,320 +8,43 @@ Usage::
 
     python3 session_facts.py <session-id or path to .jsonl> [--include-replies]
 
-Transcripts live at ``~/.claude/projects/<project>/<session-id>.jsonl``. Each line
-is one JSON record. The format is internal to Claude Code and not documented, so
-if this script starts reporting nonsense after a Claude Code update, the values in
-``transcript_format.py`` are the first place to look. The tests in
-``tools/ai-tools/tests`` encode those assumptions.
+The facts are extracted by ``transcript_parser.py``. ``format_check.py`` adds a
+WARNING to the digest when Claude Code appears to have changed its transcript
+format. The format values themselves are in ``transcript_format.py``.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
-import os
 import sys
 from collections import Counter
-from datetime import datetime
 from pathlib import Path
 
-from transcript_format import (
-    CONFIG_DIR_VARIABLE,
-    DEFAULT_CONFIG_FOLDER,
-    TRANSCRIPTS_FOLDER,
-    TRANSCRIPT_SUFFIX,
-    SUBAGENTS_FOLDER,
-    SUBAGENT_TRANSCRIPT_PATTERN,
-    SUBAGENT_META_SUFFIX,
-    SUBAGENT_TYPE_KEY,
-    SUBAGENT_DESCRIPTION_KEY,
-    RECORD_TYPE_KEY,
-    TIMESTAMP_KEY,
-    TITLE_RECORD,
-    TITLE_KEY,
-    SYSTEM_RECORD,
-    SUBTYPE_KEY,
-    COMPACTION_SUBTYPE,
-    ASSISTANT_RECORD,
-    USER_RECORD,
-    COMPACT_SUMMARY_KEY,
-    ORIGIN_KEY,
-    ORIGIN_KIND_KEY,
-    HUMAN_ORIGIN,
-    PERMISSION_MODE_KEY,
-    PLACEHOLDER_MODEL_PREFIX,
-    DENIAL_MARKER,
-    INTERRUPT_MARKER,
-    BASH_TOOL,
-    BASH_COMMAND_KEY,
-    QUESTION_TOOL,
-    FILE_EDIT_TOOLS,
-    FILE_PATH_KEY,
-    NOTEBOOK_PATH_KEY,
-    COMMAND_NAME_PATTERN,
-    COMMAND_ARGS_PATTERN,
-    SKILL_COMMAND_PATTERN,
+from transcript_parser import (
+    COMMAND_CHARACTER_LIMIT,
+    find_transcript,
+    read_records,
+    shorten,
+    timestamp_of,
+    summarize_records,
+    describe_subagents,
+)
+from format_check import (
+    RECENT_DAYS,
+    recent_transcripts,
+    format_warnings,
+    stale_facts,
 )
 
 PROMPT_CHARACTER_LIMIT = 300
-COMMAND_CHARACTER_LIMIT = 150
 # Large Claude replies are truncated to keep the digest affordable (roughly 65k tokens).
 REPLY_WORD_BUDGET = 50_000
 MAX_COMMANDS_LISTED = 60
-MAX_SUBAGENT_COMMANDS_LISTED = 8
-
-
-def find_transcript(session: str) -> Path:
-    """Resolve a session ID or file path to a transcript file.
-
-    Parameters
-    ----------
-    session
-        A session ID (UUID) or a path to a transcript ``.jsonl`` file.
-
-    Returns
-    -------
-        The path to the transcript.
-
-    Raises
-    ------
-    FileNotFoundError
-        If no transcript matches.
-    ValueError
-        If more than one transcript matches.
-    """
-    path = Path(session).expanduser()
-    if path.is_file():
-        return path
-    config_dir = Path(os.environ.get(CONFIG_DIR_VARIABLE, Path.home() / DEFAULT_CONFIG_FOLDER))
-    matches = sorted((config_dir / TRANSCRIPTS_FOLDER).glob(f"*/{session}{TRANSCRIPT_SUFFIX}"))
-    if not matches:
-        raise FileNotFoundError(f"No transcript found for session '{session}'")
-    if len(matches) > 1:
-        paths = ", ".join(str(match) for match in matches)
-        raise ValueError(f"Multiple transcripts found for session '{session}': {paths}")
-    return matches[0]
-
-
-def read_records(path: Path) -> list[dict]:
-    """Read every JSON record in a transcript, skipping malformed lines."""
-    records = []
-    with path.open() as file:
-        for line in file:
-            try:
-                records.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return records
-
-
-def content_blocks(record: dict) -> list[dict]:
-    """Return a record's message content as a list of blocks."""
-    message = record.get("message")
-    if not isinstance(message, dict):
-        return []
-    content = message.get("content")
-    if isinstance(content, str):
-        return [{"type": "text", "text": content}]
-    return content if isinstance(content, list) else []
-
-
-def text_of(block_content: object) -> str:
-    """Flatten a tool result's content, which may be a string or a list of blocks."""
-    if isinstance(block_content, str):
-        return block_content
-    if isinstance(block_content, list):
-        return " ".join(str(part.get("text", "")) for part in block_content if isinstance(part, dict))
-    return ""
-
-
-def shorten(text: str, limit: int) -> str:
-    """Collapse whitespace and truncate to ``limit`` characters."""
-    text = " ".join(text.split())
-    return text if len(text) <= limit else text[: limit - 3] + "..."
-
-
-def render_prompt(text: str) -> str:
-    """Turn a slash-command record into ``/command args``; leave other text alone."""
-    name = COMMAND_NAME_PATTERN.search(text)
-    if not name:
-        return text
-    arguments = COMMAND_ARGS_PATTERN.search(text)
-    return f"{name.group(1).strip()} {arguments.group(1).strip() if arguments else ''}".strip()
-
-
-def timestamp_of(record: dict) -> datetime | None:
-    value = record.get(TIMESTAMP_KEY)
-    if not value:
-        return None
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def format_duration(seconds: float) -> str:
     minutes = int(seconds // 60)
     return f"{minutes // 60}h {minutes % 60}m" if minutes >= 60 else f"{minutes}m"
-
-
-def summarize_records(records: list[dict]) -> dict:
-    """Extract the facts the summary needs from a list of transcript records.
-
-    Parameters
-    ----------
-    records
-        Transcript records, in file order.
-
-    Returns
-    -------
-        A dictionary of facts: prompts, answers, models, commands, edits, and counts.
-    """
-    tool_names: dict[str, str] = {}
-    commands: dict[str, str] = {}
-    facts = {
-        "prompts": [],
-        "answers": [],
-        "models": Counter(),
-        "permission_modes": Counter(),
-        "commands": [],
-        "edited_files": [],
-        "tool_errors": 0,
-        "denials": [],
-        "interruptions": 0,
-        "compactions": [],
-        # Claude's last message before each human prompt: what the human was reacting to.
-        "replies": [None],
-        "title": None,
-    }
-    for record in records:
-        record_type = record.get(RECORD_TYPE_KEY)
-        if record_type == TITLE_RECORD:
-            facts["title"] = record.get(TITLE_KEY)
-        elif record_type == SYSTEM_RECORD:
-            if record.get(SUBTYPE_KEY) == COMPACTION_SUBTYPE:
-                facts["compactions"].append(timestamp_of(record))
-        elif record_type == ASSISTANT_RECORD:
-            model = record.get("message", {}).get("model")
-            if model and not model.startswith(PLACEHOLDER_MODEL_PREFIX):
-                facts["models"][model] += 1
-            for block in content_blocks(record):
-                if block.get("type") == "tool_use":
-                    tool_names[block["id"]] = block["name"]
-                    tool_input = block.get("input", {})
-                    if block["name"] == BASH_TOOL:
-                        commands[block["id"]] = tool_input.get(BASH_COMMAND_KEY, "")
-                    elif block["name"] in FILE_EDIT_TOOLS:
-                        path = tool_input.get(FILE_PATH_KEY) or tool_input.get(NOTEBOOK_PATH_KEY)
-                        if path and path not in facts["edited_files"]:
-                            facts["edited_files"].append(path)
-                elif block.get("type") == "text" and block.get("text", "").strip():
-                    facts["replies"][-1] = block["text"]
-        elif record_type == USER_RECORD:
-            add_user_record(record, facts, tool_names, commands)
-    return facts
-
-
-def add_user_record(
-    record: dict, facts: dict, tool_names: dict[str, str], commands: dict[str, str]
-) -> None:
-    """Classify one ``user`` record: a human prompt, a tool result, or system noise.
-
-    Records typed by the human carry ``origin.kind == "human"``. Everything else
-    with ``type == "user"`` is a tool result, a system reminder, a task
-    notification, or similar, and only matters for the counts below.
-    """
-    if record.get(COMPACT_SUMMARY_KEY):
-        return
-    if (record.get(ORIGIN_KEY) or {}).get(ORIGIN_KIND_KEY) == HUMAN_ORIGIN:
-        text = " ".join(block.get("text", "") for block in content_blocks(record))
-        if SKILL_COMMAND_PATTERN.search(text):
-            return
-        if record.get(PERMISSION_MODE_KEY):
-            facts["permission_modes"][record[PERMISSION_MODE_KEY]] += 1
-        facts["prompts"].append((timestamp_of(record), render_prompt(text)))
-        facts["replies"].append(None)
-        return
-    for block in content_blocks(record):
-        if block.get("type") == "text" and block.get("text", "").startswith(INTERRUPT_MARKER):
-            facts["interruptions"] += 1
-        if block.get("type") != "tool_result":
-            continue
-        tool_use_id = block.get("tool_use_id")
-        tool_name = tool_names.get(tool_use_id, "unknown tool")
-        result = text_of(block.get("content"))
-        if result.startswith(DENIAL_MARKER):
-            facts["denials"].append(tool_name)
-        elif tool_name == QUESTION_TOOL:
-            facts["answers"].append(result)
-        elif block.get("is_error"):
-            facts["tool_errors"] += 1
-        if tool_use_id in commands:
-            status = "denied" if result.startswith(DENIAL_MARKER) else "failed" if block.get("is_error") else "ok"
-            facts["commands"].append((commands[tool_use_id], status))
-
-
-def describe_subagents(transcript: Path) -> list[list[str]]:
-    """Describe each subagent and the shell commands it ran.
-
-    Subagent transcripts live in ``<session-id>/subagents/agent-<id>.jsonl`` next to
-    the main transcript, with a sibling ``agent-<id>.meta.json`` naming its type.
-    """
-    folder = transcript.with_suffix("") / SUBAGENTS_FOLDER
-    descriptions = []
-    for agent_file in sorted(folder.glob(SUBAGENT_TRANSCRIPT_PATTERN)):
-        meta_file = agent_file.with_suffix(SUBAGENT_META_SUFFIX)
-        meta = json.loads(meta_file.read_text()) if meta_file.is_file() else {}
-        facts = summarize_records(read_records(agent_file))
-        models = ", ".join(facts["models"]) or "unknown model"
-        lines = [
-            f"- {meta.get(SUBAGENT_TYPE_KEY, 'unknown type')}: {meta.get(SUBAGENT_DESCRIPTION_KEY, '')} "
-            f"({models}; {len(facts['commands'])} commands, "
-            f"{len(facts['edited_files'])} files edited)"
-        ]
-        for command, status in facts["commands"][:MAX_SUBAGENT_COMMANDS_LISTED]:
-            lines.append(f"    - [{status}] {shorten(command, COMMAND_CHARACTER_LIMIT)}")
-        if len(facts["commands"]) > MAX_SUBAGENT_COMMANDS_LISTED:
-            lines.append(f"    - ... {len(facts['commands']) - MAX_SUBAGENT_COMMANDS_LISTED} more")
-        descriptions.append(lines)
-    return descriptions
-
-
-def format_warnings(records: list[dict], facts: dict) -> list[str]:
-    """Flag signs that Claude Code changed its transcript format.
-
-    The tests only check the parser against hand-written records, so they cannot
-    catch a format change. These checks run against the real transcript every time
-    and look for facts that every real session has but the parser failed to find.
-
-    Parameters
-    ----------
-    records
-        All records of the main transcript.
-    facts
-        The facts extracted from those records by ``summarize_records``.
-
-    Returns
-    -------
-        One warning line per problem found; empty if the transcript looks normal.
-    """
-    record_types = Counter(record.get(RECORD_TYPE_KEY) for record in records)
-    problems = []
-    if not record_types[USER_RECORD] and not record_types[ASSISTANT_RECORD]:
-        problems.append("no user or assistant records were found")
-    assistant_records = [record for record in records if record.get(RECORD_TYPE_KEY) == ASSISTANT_RECORD]
-    if assistant_records and not any("model" in record.get("message", {}) for record in assistant_records):
-        problems.append("assistant records were found but none has a model field")
-    if record_types[USER_RECORD] and not any(ORIGIN_KEY in record for record in records):
-        # Non-interactive sessions (`claude -p`) never mark human prompts.
-        problems.append(
-            "no record marks which messages the human typed, so human prompts cannot be "
-            "identified. This is expected for a non-interactive (claude -p) session"
-        )
-    if records and not any(timestamp_of(record) for record in records):
-        problems.append("no record has a timestamp")
-    return [
-        f"WARNING: {problem}. If that is unexpected, the Claude Code transcript format "
-        "may have changed; see transcript_format.py."
-        for problem in problems
-    ]
 
 
 def build_digest(transcript: Path, include_replies: bool) -> str:
@@ -349,8 +72,23 @@ def build_digest(transcript: Path, include_replies: bool) -> str:
     failed = sum(1 for _, status in facts["commands"] if status == "failed")
     denial_counts = Counter(facts["denials"])
     subagents = describe_subagents(transcript)
+    call_ids = {call["id"] for call in facts["subagent_calls"]}
+    transcript_ids = {subagent["tool_use_id"] for subagent in subagents}
+    # Subagents can be dispatched without a transcript here (for example, before this
+    # session continued from an earlier one), or have a transcript whose dispatch is
+    # not in this file. Count both.
+    subagent_count = len(facts["subagent_calls"]) + sum(1 for s in subagents if s["tool_use_id"] not in call_ids)
+    without_transcript = [call for call in facts["subagent_calls"] if call["id"] not in transcript_ids]
 
-    lines = [f"# Session facts: {transcript.stem}", *format_warnings(records, facts)]
+    lines = [f"# Session facts: {transcript.stem}", *format_warnings(records, facts, len(subagents))]
+    # The same check maintainers can run by hand, over this user's recent sessions.
+    # It prints nothing unless a fact has stopped appearing.
+    flagged = stale_facts(recent_transcripts())
+    lines += [
+        f"WARNING: across your sessions from the last {RECENT_DAYS} days, {description}. The Claude Code "
+        "transcript format may have changed; see transcript_format.py."
+        for description in flagged
+    ]
     if facts["title"]:
         lines.append(f"Title: {facts['title']}")
     if timestamps:
@@ -369,7 +107,9 @@ def build_digest(transcript: Path, include_replies: bool) -> str:
         f"Shell commands: {len(facts['commands'])} ({failed} failed); other tool errors: {facts['tool_errors']}",
         f"Compactions (earlier context summarized): {len(facts['compactions'])}"
         + "".join(f"; {when:%Y-%m-%d %H:%M} UTC" for when in facts["compactions"] if when),
-        f"Subagents: {len(subagents)}",
+        f"Subagents: {subagent_count}"
+        + (f" ({len(without_transcript)} without a transcript in this session's folder)" if without_transcript else ""),
+        f"Claude Code version: {facts['version'] or 'not recorded'}",
         "",
         "## Human prompts (verbatim, truncated)",
     ]
@@ -388,8 +128,12 @@ def build_digest(transcript: Path, include_replies: bool) -> str:
     lines += [f"- [{status}] {shorten(command, COMMAND_CHARACTER_LIMIT)}" for command, status in listed]
     if not listed:
         lines.append("- none")
-    if subagents:
-        lines += ["", "## Subagents"] + [line for agent in subagents for line in agent]
+    if subagents or without_transcript:
+        lines += ["", "## Subagents"] + [line for subagent in subagents for line in subagent["lines"]]
+        lines += [
+            f"- {call['type']}: {call['description']} (no transcript in this session's folder)"
+            for call in without_transcript
+        ]
     if include_replies or facts["compactions"]:
         lines += ["", *reply_lines([text for text in facts["replies"] if text])]
     return "\n".join(lines)
@@ -426,7 +170,6 @@ def main() -> None:
     except (FileNotFoundError, ValueError) as error:
         sys.exit(str(error))
     print(build_digest(transcript, arguments.include_replies))
-
 
 if __name__ == "__main__":
     main()

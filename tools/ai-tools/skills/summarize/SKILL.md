@@ -148,8 +148,9 @@ counted toward the limit):
   520 words, over the 400 limit, to keep all 9 unverified items."
 - If the digest warned that Claude's messages were truncated, say the summary
   may be incomplete.
-- If the digest has any other WARNING line, quote it and say the counts in the
-  summary may be wrong.
+- If the digest has any other WARNING line, quote it, say the counts in the
+  summary may be wrong, and ask the user to send the warning to the maintainers
+  of the `simsci-research` plugin.
 - If you went over the limit or your revision in step 4 dropped detail, say how
   to get more: rerun with a higher limit, e.g. "For more detail, run
   `/simsci-research:summarize <word_count>`", where `<word_count>` is twice the

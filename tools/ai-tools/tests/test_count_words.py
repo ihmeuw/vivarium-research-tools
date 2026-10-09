@@ -43,3 +43,7 @@ def test_command_line_prints_the_count(tmp_path: Path) -> None:
     script = Path(__file__).parents[1] / "skills" / "summarize" / "scripts" / "count_words.py"
     result = subprocess.run([sys.executable, str(script), str(draft)], capture_output=True, text=True)
     assert result.stdout.strip() == "3"
+
+
+def test_older_one_line_session_form_is_excluded() -> None:
+    assert count_summary_words("**Session:** title - claude-opus-5 - 3 prompts\n**Summary**\n- one") == 2
