@@ -104,7 +104,7 @@ def format_warnings(records: list[dict], facts: dict, subagent_transcripts: int 
 
 
 def fact_counts(transcript: Path) -> tuple[dict, list[tuple[str, int]]]:
-    """Count the optional transcript facts in one session, for the format check.
+    """Count the transcript facts in one session, for the format check.
 
     Parameters
     ----------
@@ -113,7 +113,7 @@ def fact_counts(transcript: Path) -> tuple[dict, list[tuple[str, int]]]:
 
     Returns
     -------
-        The session's extracted facts, and each optional fact's label and count.
+        The session's extracted facts, and each fact's label and count.
     """
     facts = summarize_records(read_records(transcript))
     subagents = describe_subagents(transcript)
@@ -139,7 +139,7 @@ def fact_counts(transcript: Path) -> tuple[dict, list[tuple[str, int]]]:
 
 
 def stale_facts(transcripts: list[Path]) -> list[str]:
-    """Find optional transcript facts that have stopped appearing across many sessions.
+    """Find transcript facts that have stopped appearing across many sessions.
 
     A fact a session may legitimately lack (an interruption, a compaction) cannot
     show a rename in any single session. Across many sessions it can: if a fact
