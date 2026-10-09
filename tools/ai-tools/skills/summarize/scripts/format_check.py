@@ -97,7 +97,7 @@ def format_warnings(records: list[dict], facts: dict, subagent_transcripts: int 
     if subagent_transcripts and not facts["subagent_calls"]:
         problems.append("subagent transcripts exist but no subagent dispatch was found")
     return [
-        f"WARNING: {problem}. If that is unexpected, the Claude Code transcript format "
+        f"FORMAT WARNING: {problem}. If that is unexpected, the Claude Code transcript format "
         "may have changed; see transcript_format.py."
         for problem in problems
     ]

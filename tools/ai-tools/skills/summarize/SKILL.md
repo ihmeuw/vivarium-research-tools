@@ -146,10 +146,10 @@ counted toward the limit):
   520 words, over the 400 limit, to keep all 9 unverified items."
 - If the digest has NOTE lines, part of the input was missing: say the summary
   may be incomplete or its counts may be low, as the NOTE describes.
-- If the digest has WARNING lines, Claude Code may have changed its transcript
-  format: quote each one, say the counts in the summary may be wrong, and ask
-  the user to send the warning to the maintainers of the `simsci-research`
-  plugin.
+- If the digest has FORMAT WARNING lines, Claude Code may have changed its
+  transcript format: quote each one, say the counts in the summary may be wrong,
+  and ask the user to send the warning to the maintainers of the
+  `simsci-research` plugin.
 - If you went over the limit or your revision in step 4 dropped detail, say how
   to get more: rerun with a higher limit, e.g. "For more detail, run
   `/simsci-research:summarize <word_count>`", where `<word_count>` is twice the

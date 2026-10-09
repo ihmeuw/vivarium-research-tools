@@ -2,8 +2,8 @@
 
 Claude Code's transcripts are internal and undocumented, so a Claude Code release
 can change any of the values below. Every time the skill runs, it checks the
-user's sessions from the last two weeks and reports a WARNING when a fact has
-stopped appearing. When a WARNING is reported, or the digest starts reporting
+user's sessions from the last two weeks and reports a FORMAT WARNING when a fact has
+stopped appearing. When a FORMAT WARNING is reported, or the digest starts reporting
 nonsense, compare a transcript from the newer Claude Code version in
 ``~/.claude/projects/`` with these values, then update them here and in the test
 fixtures in ``tools/ai-tools/tests``.

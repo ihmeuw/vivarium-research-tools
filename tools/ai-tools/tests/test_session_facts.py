@@ -40,7 +40,7 @@ class TestBuildDigest:
         digest = session_facts.build_digest(transcript, include_replies=False)
 
         assert "Subagents: 1\n" in digest
-        assert "WARNING" not in digest
+        assert "FORMAT WARNING" not in digest
         assert "- general-purpose: Audit arithmetic (claude-opus-5-5; 1 commands, 0 files edited)" in digest
         assert "    - [ok] python recompute.py" in digest
         assert "Human prompts: 2 (" in digest
@@ -70,7 +70,7 @@ class TestBuildDigest:
         digest = session_facts.build_digest(write_transcript(tmp_path / "session.jsonl", records), include_replies=False)
         assert "Span:" not in digest
         assert "Human prompts: 0 (0 words)" in digest
-        assert "WARNING: no record has a timestamp" in digest
+        assert "FORMAT WARNING: no record has a timestamp" in digest
 
     def test_subagents_without_transcripts_are_counted(self, tmp_path: Path) -> None:
         records = [
@@ -106,13 +106,13 @@ class TestBuildDigest:
         newer.write_text(newer.read_text().replace("[Request interrupted by user]", "[Interrupted]"))
         digest = session_facts.build_digest(newer, include_replies=False)
         assert (
-            "WARNING: across your sessions from the last 14 days, interruptions (Esc): last seen in 2.1.290"
+            "FORMAT WARNING: across your sessions from the last 14 days, interruptions (Esc): last seen in 2.1.290"
         ) in digest
-        assert digest.count("WARNING") == 1
+        assert digest.count("FORMAT WARNING") == 1
 
     def test_digest_has_no_format_warning_when_recent_sessions_look_normal(self, isolated_config: Path) -> None:
         transcript = canary_session(isolated_config / "projects" / "-repo")
-        assert "WARNING" not in session_facts.build_digest(transcript, include_replies=False)
+        assert "FORMAT WARNING" not in session_facts.build_digest(transcript, include_replies=False)
 
     def test_damaged_recent_session_does_not_break_the_digest(self, isolated_config: Path) -> None:
         projects = isolated_config / "projects" / "-repo"
@@ -178,7 +178,7 @@ class TestBuildDigest:
         transcript.write_text(json.dumps(human("go")) + "\nnot json\n" + json.dumps(human("more")) + "\n")
         digest = session_facts.build_digest(transcript, include_replies=False)
         assert "NOTE: 1 transcript lines could not be read, so counts may be low." in digest
-        assert "WARNING" not in digest
+        assert "FORMAT WARNING" not in digest
 
     @pytest.mark.parametrize(
         "damaged_line",
@@ -207,7 +207,7 @@ class TestReplies:
         digest = session_facts.build_digest(transcript, include_replies=True)
         assert "## Claude's last message before each prompt" in digest
         assert "- Here is the comparison." in digest
-        assert "WARNING" not in digest
+        assert "FORMAT WARNING" not in digest
         assert "Subagents: 0" in digest
 
     def test_long_replies_are_kept_in_full_under_the_budget(self) -> None:
