@@ -1,0 +1,117 @@
+# Tag-and-release workflow for the `tools/ai-tools` Claude Code plugin
+# (published as `simsci-research` in vivarium-suite's marketplace.json).
+#
+# The plugin is not a Python package: it ships skills, not importable code. This
+# workflow exists only to cut a git tag and a GitHub Release so plugin changes
+# are tracked - there is no build/test/publish step.
+#
+# Version source: the first line of tools/ai-tools/CHANGELOG.rst, formatted
+# "**X.Y.Z - MM/DD/YY**" (2-digit year, Pacific date matching the push day).
+
+name: Release AI Tools
+
+on:
+  push:
+    branches: [main]
+    paths: ['tools/ai-tools/CHANGELOG.rst']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 0.1.2)'
+        required: true
+        type: string
+
+jobs:
+  release:
+    name: Release simsci-research
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          # On a manual dispatch use the supplied version; on a push to main
+          # parse it from the CHANGELOG head.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="$INPUT_VERSION"
+          else
+            VERSION=$(head -1 tools/ai-tools/CHANGELOG.rst | grep -oP '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+          fi
+
+          # Validate both the parsed and the dispatched value as strict X.Y.Z
+          # so a malformed input never flows into the tag name.
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Could not resolve a valid X.Y.Z version (got '${VERSION}')"
+            exit 1
+          fi
+
+          TAG="ai-tools-v$VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+          # A CHANGELOG edit that does not bump the version (e.g. fixing an
+          # older entry) leaves the head version's tag already present. Detect
+          # that before the date check so a no-op push succeeds instead of
+          # failing on a stale head date. Requires fetch-depth: 0 above.
+          if git tag -l "$TAG" | grep -q .; then
+            echo "Tag $TAG already exists; nothing new to release."
+            echo "release_needed=false" >> $GITHUB_OUTPUT
+          else
+            echo "release_needed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Validate CHANGELOG date
+        # Only on a push that cuts a new release: the CHANGELOG date must match
+        # the push day (Pacific). Skipped for workflow_dispatch, a recovery path
+        # that may re-release an older entry.
+        # (?!\d) prevents a partial match on a 4-digit year; `|| true` lets the
+        # comparison below report a missing date instead of aborting silently.
+        if: github.event_name == 'push' && steps.version.outputs.release_needed == 'true'
+        run: |
+          CHANGELOG_DATE=$(head -1 tools/ai-tools/CHANGELOG.rst | grep -oP '\d{2}/\d{2}/\d{2}(?!\d)' || true)
+          TODAY=$(TZ='America/Los_Angeles' date +%m/%d/%y)
+          if [ "$CHANGELOG_DATE" != "$TODAY" ]; then
+            echo "CHANGELOG date ('$CHANGELOG_DATE') does not match today ('$TODAY')"
+            exit 1
+          fi
+
+      - name: Create and push tag
+        if: steps.version.outputs.release_needed == 'true'
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$TAG"
+          git push origin "$TAG"
+
+      - name: Create GitHub Release
+        # `release view || create` is idempotent: it no-ops when the release
+        # exists and recovers a prior run that pushed the tag but not the release.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          gh release view "$TAG" 2>/dev/null || gh release create "$TAG" \
+            --title "simsci-research v${{ steps.version.outputs.version }}" \
+            --generate-notes
+
+      - name: Send failure notification
+        if: failure()
+        uses: dawidd6/action-send-mail@v2
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.NOTIFY_EMAIL }}
+          password: ${{ secrets.NOTIFY_PASSWORD }}
+          subject: ${{ github.job }} job of ${{ github.repository }} has ${{ job.status }}
+          body: ${{ github.job }} job in workflow ${{ github.workflow }} of ${{ github.repository }} has ${{ job.status }}
+          to: uw_ihme_simulationscience@uw.edu
+          from: Vivarium Notifications
