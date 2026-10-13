@@ -21,11 +21,13 @@ It includes:
 Layout
 ======
 
-- ``tools/ai-tools/.claude-plugin/plugin.json``: plugin manifest
+- ``.claude-plugin/plugin.json`` (at the repository root): plugin manifest. It sits
+  at the root so that the marketplace can use a plain ``github`` source. Its
+  ``skills`` field points at ``tools/ai-tools/skills/``.
 - ``tools/ai-tools/skills/``: Claude Code skills
 - ``tools/ai-tools/tests/``: tests for scripts bundled with the skills
   (run ``python3 -m pytest tools/ai-tools/tests``; CI runs them on every PR that
-  touches ``tools/ai-tools/``)
+  touches ``tools/ai-tools/`` or ``.claude-plugin/``)
 - ``tools/ai-tools/CHANGELOG.rst``: history of plugin changes
 
 Installing in Claude Code

@@ -8,7 +8,7 @@ name: Test AI Tools
 
 on:
   pull_request:
-    paths: ['tools/ai-tools/**', '.github/workflows/test-ai-tools.yml']
+    paths: ['tools/ai-tools/**', '.claude-plugin/**', '.github/workflows/test-ai-tools.yml']
   workflow_dispatch:
 
 jobs:
