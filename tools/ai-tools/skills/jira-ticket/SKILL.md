@@ -1,14 +1,13 @@
 ---
 name: jira-ticket
-description: File one or more Jira tickets in the SSCI project for the Simulation Science research team, from a short request or from pasted notes out of a Zoom call or Slack thread. Picks the epic, drafts each ticket with Description and Acceptance Criteria sections, and files them after the user approves. Use whenever the user asks to make, open, create, write, or file a ticket, story, or Jira issue, wants to turn meeting notes or a to-do list into tickets, or wants to add work to SSCI or to the research team's board, even if they do not say "Jira".
+description: File one or more Jira tickets in the SSCI project for the Simulation Science research team, from a short request or from pasted notes. Picks the epic, drafts each ticket with Description and Acceptance Criteria sections, and files them after the user approves. Use whenever the user asks to make, open, create, write, or file a ticket, story, or Jira issue, wants to turn meeting notes or a to-do list into tickets, or wants to add work to SSCI or to the research team's board, even if they do not say "Jira".
 argument-hint: "[what the ticket or tickets are about]"
 ---
 
 # File SSCI tickets
 
-Researchers file tickets in the SSCI project after a Zoom call or a Slack
-discussion. They know what the work is. The hard part for them is Jira itself:
-which epic, which fields, what a ticket should contain. Your job is the
+Researchers typically file tickets in the SSCI project after a Zoom call or
+sometimes after a Slack discussion. They know what the work is. Your job is the
 structure and the filing. The content belongs to the researcher, because you
 were not in the meeting and you do not know the project details they know.
 
@@ -58,8 +57,8 @@ mcp__plugin_mcp-jira_mcp-jira__search(
 ```
 
 Propose the epic that best matches the request, with its key and title, and ask
-the user to confirm it. If two epics fit equally well, show both and ask. If
-none fits, show the full list and ask the user to pick one or give an epic key.
+the user to confirm it. If several epics fit equally well, show them and ask. If
+none fit, show the full list and ask the user to pick one or give an epic key.
 If the user says the tickets need no epic, file them without one and say so in
 the final report.
 
@@ -72,7 +71,7 @@ These fields are fixed. Do not ask about them:
 - Project: `SSCI`
 - Issue type: `Story`
 - Priority: `Minor`
-- Assignee: none. The team assigns tickets in Jira.
+- Assignee: none. The team assigns tickets manually in Jira.
 
 Each ticket has a title and a description. Keep the title short and specific,
 for example "V&V for India, Folic Acid". Write the description in Jira wiki
@@ -93,16 +92,18 @@ made up is worse than a short ticket, because the person who picks up the
 ticket cannot tell your guess from the researcher's intent.
 
 If either section would be empty, ask the user for it. For Acceptance Criteria,
-ask "What are the acceptance criteria for this ticket?". In a batch, ask once for the
-whole batch when the tickets share a pattern. For example, "Run the existing V&V
-notebooks for this location and nutrient" can be repeated for each location and
-nutrient.
+ask "What are the acceptance criteria for this ticket?".
 
-In a batch, a request like "runs for Ethiopia iron and folic acid" often gives
-you nothing for the Description except the title. If so, ask once: "Is there a
-sentence of context these tickets share?". Put the answer in the Description of
-every ticket in the batch. If the user has nothing to add, use the title as the
-Description and do not ask again.
+In a batch, some requests give you nothing for the Description except the title.
+In this case, ask once: "Is there a description these tickets share?". Put the
+answer in the Description of every ticket in the batch. If the user has nothing
+to add, use the title as the Description and do not ask again.
+
+In a batch with no acceptance criteria, the criteria may be the same for every
+ticket, or each ticket may have its own. Ask the user: "Do these tickets share
+acceptance criteria, or does each ticket have its own?". If they share, put the
+answer in every ticket. If each ticket has its own, ask for all of them in one
+message that lists the ticket titles.
 
 If the user says there are no acceptance criteria yet, do not suggest any. Put
 this line in the Acceptance Criteria section instead, so the section still
@@ -144,5 +145,4 @@ and which tickets were already filed, and ask the user how to continue. Do not
 retry the failed call without asking, because a retry after a partial failure
 can create a duplicate ticket.
 
-End with one line: the user should set the sprint and the assignee in Jira,
-because this skill cannot set the sprint and leaves assignment to the team.
+End with: "Set the sprint and the assignee in Jira."
