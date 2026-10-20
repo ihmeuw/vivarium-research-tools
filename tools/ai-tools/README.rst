@@ -17,6 +17,11 @@ It includes:
   reviewed, and what was and was not verified). Facts such as the prompts, models,
   and commands run are read from the session transcript by
   ``skills/summarize/scripts/session_facts.py``; the word limit defaults to 400.
+- ``/simsci-research:jira-ticket [request]``: files one or more Story tickets in the
+  SSCI Jira project from a short request or pasted meeting notes. It proposes the
+  epic, drafts Description and Acceptance Criteria sections from the user's words,
+  and files nothing until the user approves. It does not set the sprint or the
+  assignee. It needs the ``mcp-jira`` plugin (see below).
 
 Layout
 ======
@@ -43,3 +48,13 @@ Inside a Claude Code session:
 If you already have ``simsci`` or ``simsci-internal`` installed, the marketplace is
 already added and only the second command is needed. Restart Claude Code or run
 ``/reload-plugins`` afterwards.
+
+The ``jira-ticket`` skill also needs the ``mcp-jira`` plugin:
+
+.. code-block:: text
+
+   /plugin marketplace add ihme-internal/ihme-claude-marketplace
+   /plugin install mcp-jira@ihme-claude-marketplace
+
+The first Jira call asks you to sign in. If a later call says you need to sign in
+again, run ``/mcp`` and sign in to ``mcp-jira``.
