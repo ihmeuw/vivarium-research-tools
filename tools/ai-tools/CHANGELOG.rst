@@ -1,4 +1,4 @@
-**0.2.0 - 10/21/26**
+**0.2.0 - 10/22/26**
 
 - Add the ``jira-ticket`` skill: files SSCI jira tickets
 
