@@ -35,16 +35,45 @@ the work in their own words or paste notes.
 
 ## 3. Decide how many tickets
 
-Split the request into tickets. A good ticket is one piece of work that one
-person can finish and close.
+Assume the request is one ticket. A bulleted list in meeting notes often
+describes the steps of one piece of work, not separate tickets, so do not split
+a request on your own judgement.
 
-If you find more than one ticket, list the proposed titles and ask whether the
-user wants that many tickets or one ticket that covers all of them. Ask before
-you draft anything. A bulleted list in meeting notes often describes the steps
-of one piece of work, not separate tickets, and drafting a batch the user did
-not want wastes their time.
+Make more than one ticket only when the user explicitly asks for more than one,
+for example "make tickets for these", "one ticket for each location", or "file
+data updates, runs, and V&V tickets for Ethiopia". In that case, list the
+proposed titles and ask the user to confirm them before you draft anything.
 
-## 4. Choose the epic
+## 4. Choose the assignee
+
+Ask who to assign the tickets to, unless the user already said. In a batch, ask
+once for the whole batch. The answer can be:
+
+- "Me": run `whoami` and use the result as the Jira username. At IHME, the
+  local login is usually the same as the Jira username.
+- A person's name: look up their Jira username in the table below.
+- A Jira username, for example `lutzes`.
+- Nobody: leave the tickets unassigned.
+
+Jira needs the username, not the person's name, and the Jira tools cannot look
+up a username from a name. These are the research team's usernames:
+
+| Name      | Jira username |
+|-----------|---------------|
+| Abie      | `abie`        |
+| Ali       | `alibow`      |
+| Alix      | `pletale`     |
+| Juhi      | `juhit`       |
+| Nathaniel | `ndbs`        |
+| Syl       | `lutzes`      |
+| Tyler     | `tylerdy`     |
+| Zeb       | `zmbc`        |
+
+If the name is not in the table, ask the user for that person's Jira username.
+Do not guess it, because a wrong guess assigns the ticket to someone else or
+fails.
+
+## 5. Choose the epic
 
 Every SSCI ticket belongs to an epic, which is how the team groups work by
 project. Fetch the open epics:
@@ -56,22 +85,49 @@ mcp__plugin_mcp-jira_mcp-jira__search(
 )
 ```
 
-Propose the epic that best matches the request, with its key and title, and ask
-the user to confirm it. If several epics fit equally well, show them and ask. If
-none fit, show the full list and ask the user to pick one or give an epic key.
-If the user says the tickets need no epic, file them without one and say so in
-the final report.
+If an epic title clearly matches the request, propose it.
+
+Epic titles are often too vague to match. If no title clearly matches, look at
+where similar tickets went. Search results do not show a ticket's epic, so do
+it in two searches:
+
+1. Find similar tickets from the last six months. Older tickets often sit in
+   epics for finished phases of a project. Search for tickets with words from
+   the request in the summary, and for the user's own recent tickets:
+
+   ```text
+   project = SSCI AND summary ~ "<key word>" AND updated >= -180d ORDER BY updated DESC
+   project = SSCI AND (reporter = currentUser() OR assignee = currentUser()) AND updated >= -180d ORDER BY updated DESC
+   ```
+
+   If the tickets have an assignee (step 4), also search for that person's
+   recent tickets.
+2. For each open epic, count how many of those tickets it holds:
+
+   ```text
+   "Epic Link" = <epic key> AND key in (<similar ticket keys>)
+   ```
+
+   Run these searches with `limit=1`, because only the total matters.
+
+Propose the epic with the most similar tickets, and say why, for example "3 of
+the 5 recent hemoglobin tickets are in SSCI-2185".
+
+Always ask the user to confirm the epic you propose, with its key and title. If
+several epics fit equally well, show them and ask. If nothing points to an epic,
+show the full list and ask the user to pick one or give an epic key. If the user
+says the tickets need no epic, file them without one and say so in the final
+report.
 
 In a batch, use the same epic for every ticket unless the user says otherwise.
 
-## 5. Draft the tickets
+## 6. Draft the tickets
 
 These fields are fixed. Do not ask about them:
 
 - Project: `SSCI`
 - Issue type: `Story`
 - Priority: `Minor`
-- Assignee: none. The team assigns tickets manually in Jira.
 
 Each ticket has a title and a description. Keep the title short and specific,
 for example "V&V for India, Folic Acid". Write the description in Jira wiki
@@ -115,17 +171,17 @@ _To be defined._
 
 Say which tickets have this placeholder when you show them for approval.
 
-## 6. Get approval
+## 7. Get approval
 
 Show the user everything you will file:
 
-- The fixed fields and the epic, once at the top.
+- The fixed fields, the epic, and the assignee, once at the top.
 - For each ticket: the title and the full description as it will be sent.
 
 Then ask the user to approve. File nothing until the user says yes. If they ask
 for changes, make them and show the changed tickets again.
 
-## 7. File the tickets
+## 8. File the tickets
 
 File the tickets one at a time:
 
@@ -137,6 +193,7 @@ mcp__plugin_mcp-jira_mcp-jira__create_issue(
     summary="<title>",
     description="<wiki markup description>",
     epic="<epic key>",
+    assignee="<Jira username, or leave this out for no assignee>",
 )
 ```
 
@@ -145,4 +202,8 @@ and which tickets were already filed, and ask the user how to continue. Do not
 retry the failed call without asking, because a retry after a partial failure
 can create a duplicate ticket.
 
-End with: "Set the sprint and the assignee in Jira."
+If the first ticket fails because the assignee does not exist, the username is
+wrong. Ask the user for the correct one.
+
+End with: "Set the sprint in Jira." This skill cannot set the sprint, because
+the Jira tools do not support it.

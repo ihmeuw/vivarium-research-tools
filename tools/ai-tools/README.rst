@@ -19,9 +19,10 @@ It includes:
   ``skills/summarize/scripts/session_facts.py``; the word limit defaults to 400.
 - ``/simsci-research:jira-ticket [request]``: files one or more Story tickets in the
   SSCI Jira project from a short request or pasted meeting notes. It proposes the
-  epic, drafts Description and Acceptance Criteria sections from the user's words,
-  and files nothing until the user approves. It does not set the sprint or the
-  assignee. It needs the ``mcp-jira`` plugin (see below).
+  epic, asks who to assign the tickets to, drafts Description and Acceptance
+  Criteria sections from the user's words, and files nothing until the user
+  approves. It does not set the sprint. It needs the ``mcp-jira`` plugin (see
+  below).
 
 Layout
 ======
