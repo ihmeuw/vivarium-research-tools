@@ -24,13 +24,28 @@ It includes:
   approves. It does not set the sprint. It needs the ``mcp-jira`` plugin (see
   below).
 
+A ``SessionStart`` hook adds a short plain-English writing text
+(``tools/ai-tools/hooks/writing-style.txt``), based on ASD-STE100 Simplified
+Technical English, to the start of each session. It is the same text that the
+``simsci-internal`` plugin adds. The text does not name the standard, because in
+evals, naming it made the output less clear and less complete. Replies, PR text,
+tickets, and commit messages from the main session then follow it. The hook runs
+again after ``/clear`` and after compaction. Subagents do not get the text. The
+hook runs through ``bash``, which on Windows means Git Bash. To disable the hook,
+set ``SIMSCI_WRITING_STYLE=off`` in the environment that starts Claude Code, or
+under ``env`` in ``~/.claude/settings.json``. This setting also disables the
+``simsci-internal`` hook.
+
 Layout
 ======
 
 - ``.claude-plugin/plugin.json`` (at the repository root): plugin manifest. It sits
   at the root so that the marketplace can use a plain ``github`` source. Its
-  ``skills`` field points at ``tools/ai-tools/skills/``.
+  ``skills`` field points at ``tools/ai-tools/skills/`` and its ``hooks`` field
+  points at ``tools/ai-tools/hooks/hooks.json``.
 - ``tools/ai-tools/skills/``: Claude Code skills
+- ``tools/ai-tools/hooks/``: the ``SessionStart`` hook that adds the writing-style
+  text to each session
 - ``tools/ai-tools/tests/``: tests for scripts bundled with the skills
   (run ``python3 -m pytest tools/ai-tools/tests``; CI runs them on every PR that
   touches ``tools/ai-tools/`` or ``.claude-plugin/``)

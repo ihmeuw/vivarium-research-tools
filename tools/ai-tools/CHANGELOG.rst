@@ -1,3 +1,8 @@
+**0.2.1 - 10/22/26**
+
+- Add a ``SessionStart`` hook that adds a short plain-English writing text, based
+  on ASD-STE100 Simplified Technical English, to each session
+
 **0.2.0 - 10/22/26**
 
 - Add the ``jira-ticket`` skill: files SSCI jira tickets
