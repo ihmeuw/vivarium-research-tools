@@ -2,7 +2,6 @@
 
 - Depend on the ``simsci`` plugin, and use its ``jira`` MCP server instead of
   IHME Infra's ``mcp-jira`` plugin
-  (`MIC-7348 <https://jira.ihme.washington.edu/browse/MIC-7348>`_)
 - ``jira-ticket``: offer to add the tickets to the active SSCI sprint, and use
   ``me`` for the "Me" assignee instead of ``whoami``
 

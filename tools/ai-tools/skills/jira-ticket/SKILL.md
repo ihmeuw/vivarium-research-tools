@@ -28,8 +28,9 @@ tool is not available, stop and give the user these steps:
 If a Jira call fails with "No Jira token is set", tell the user to create a
 personal access token in Jira (avatar > **Profile** > **Personal Access
 Tokens** > **Create token**), enter it in `/plugin` > **Installed** >
-**simsci** > **Configure options**, and restart Claude Code. Do not ask the user
-to paste the token into the conversation.
+**simsci** > **Configure options**, and restart Claude Code. Warn the user not to
+paste the token into the conversation, because the token gives access to their
+Jira account.
 
 ## 2. Collect the request
 
