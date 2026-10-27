@@ -13,18 +13,23 @@ were not in the meeting and you do not know the project details they know.
 
 ## 1. Check the Jira tools
 
-This skill files tickets through the `mcp-jira` plugin. If the
-`mcp__plugin_mcp-jira_mcp-jira__create_issue` tool is not available, stop and
-give the user these commands to run in Claude Code:
+This skill files tickets through the `jira` MCP server of the `simsci` plugin,
+which this plugin depends on. If the `mcp__plugin_simsci_jira__create_issue`
+tool is not available, stop and give the user these steps:
 
-```text
-/plugin marketplace add ihme-internal/ihme-claude-marketplace
-/plugin install mcp-jira@ihme-claude-marketplace
-```
+1. Run `/mcp`. If `plugin:simsci:jira` shows
+   `Executable not found in $PATH: "uv"`, install `uv`
+   (`curl -LsSf https://astral.sh/uv/install.sh | sh`) and restart Claude Code.
+   If it then says that a recent failure is cached, Claude Code waits up to 15
+   minutes before it tries again. Tell the user to restart after that time.
+2. If `plugin:simsci:jira` is not listed, run
+   `/plugin install simsci@vivarium-ai-tools` and restart Claude Code.
 
-They need to restart Claude Code or run `/reload-plugins` afterwards. If a Jira
-call fails because the user needs to sign in, tell them to run `/mcp` and sign
-in to `mcp-jira`, then continue from where you stopped.
+If a Jira call fails with "No Jira token is set", tell the user to create a
+personal access token in Jira (avatar > **Profile** > **Personal Access
+Tokens** > **Create token**), enter it in `/plugin` > **Installed** >
+**simsci** > **Configure options**, and restart Claude Code. Do not ask the user
+to paste the token into the conversation.
 
 ## 2. Collect the request
 
@@ -44,13 +49,13 @@ for example "make tickets for these", "one ticket for each location", or "file
 data updates, runs, and V&V tickets for Ethiopia". In that case, list the
 proposed titles and ask the user to confirm them before you draft anything.
 
-## 4. Choose the assignee
+## 4. Choose the assignee and sprint
 
 Ask who to assign the tickets to, unless the user already said. In a batch, ask
 once for the whole batch. The answer can be:
 
-- "Me": run `whoami` and use the result as the Jira username. At IHME, the
-  local login is usually the same as the Jira username.
+- "Me": use `me`. The Jira tools assign the ticket to the owner of the Jira
+  token.
 - A person's name: look up their Jira username in the table below.
 - A Jira username, for example `lutzes`.
 - Nobody: leave the tickets unassigned.
@@ -73,13 +78,17 @@ If the name is not in the table, ask the user for that person's Jira username.
 Do not guess it, because a wrong guess assigns the ticket to someone else or
 fails.
 
+In the same question, ask whether to add the tickets to the active SSCI sprint,
+unless the user already said. If they say yes, pass `sprint="active"` when you
+file them (step 8). Otherwise, leave the tickets in the backlog.
+
 ## 5. Choose the epic
 
 Every SSCI ticket belongs to an epic, which is how the team groups work by
 project. Fetch the open epics:
 
 ```text
-mcp__plugin_mcp-jira_mcp-jira__search(
+mcp__plugin_simsci_jira__search(
     jql="project = SSCI AND issuetype = Epic AND statusCategory != Done ORDER BY updated DESC",
     limit=50,
 )
@@ -175,7 +184,8 @@ Say which tickets have this placeholder when you show them for approval.
 
 Show the user everything you will file:
 
-- The fixed fields, the epic, and the assignee, once at the top.
+- The fixed fields, the epic, the assignee, and the sprint (active sprint or
+  backlog), once at the top.
 - For each ticket: the title and the full description as it will be sent.
 
 Then ask the user to approve. File nothing until the user says yes. If they ask
@@ -186,24 +196,25 @@ for changes, make them and show the changed tickets again.
 File the tickets one at a time:
 
 ```text
-mcp__plugin_mcp-jira_mcp-jira__create_issue(
+mcp__plugin_simsci_jira__create_issue(
     project="SSCI",
     issue_type="Story",
     priority="Minor",
     summary="<title>",
     description="<wiki markup description>",
     epic="<epic key>",
-    assignee="<Jira username, or leave this out for no assignee>",
+    assignee="<Jira username or me, or leave this out for no assignee>",
+    sprint="active",  # only if the user chose the active sprint in step 4
 )
 ```
 
-After each one, report its key and URL. If a call fails, stop, report the error
-and which tickets were already filed, and ask the user how to continue. Do not
-retry the failed call without asking, because a retry after a partial failure
-can create a duplicate ticket.
+After each one, report its key and URL. The ticket is filed even if adding it to
+the sprint fails. In that case the result has a `sprint_failure` message: report
+it and tell the user to set the sprint in Jira.
+
+If a call fails, stop, report the error and which tickets were already filed,
+and ask the user how to continue. Do not retry the failed call without asking,
+because a retry after a partial failure can create a duplicate ticket.
 
 If the first ticket fails because the assignee does not exist, the username is
 wrong. Ask the user for the correct one.
-
-End with: "Set the sprint in Jira." This skill cannot set the sprint, because
-the Jira tools do not support it.
