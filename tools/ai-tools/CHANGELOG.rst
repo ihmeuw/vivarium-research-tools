@@ -1,3 +1,10 @@
+**0.3.0 - 10/26/26**
+
+- Depend on the ``simsci`` plugin, and use its ``jira`` MCP server instead of
+  IHME Infra's ``mcp-jira`` plugin
+- ``jira-ticket``: offer to add the tickets to the active SSCI sprint, and use
+  ``me`` for the "Me" assignee instead of ``whoami``
+
 **0.2.1 - 10/22/26**
 
 - Add a ``SessionStart`` hook that adds a short plain-English writing text, based

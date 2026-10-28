@@ -6,6 +6,7 @@
     "homepage": "https://github.com/ihmeuw/vivarium-research-tools/blob/main/tools/ai-tools/README.rst",
     "repository": "https://github.com/ihmeuw/vivarium-research-tools",
     "license": "BSD-3-Clause",
+    "dependencies": ["simsci"],
     "skills": "./tools/ai-tools/skills/",
     "hooks": "./tools/ai-tools/hooks/hooks.json"
 }
